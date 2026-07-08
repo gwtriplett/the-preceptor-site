@@ -1,0 +1,543 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Student Intake — The Preceptor Site</title>
+<style>
+  :root{
+    --ink:#1A1A2E;
+    --muted:#5F5E5A;
+    --blue-700:#0C447C;
+    --blue-600:#1A73C8;
+    --blue-500:#1A73C8;
+    --cyan-400:#00B4D8;
+    --cyan-300:#00B4D8;
+    --bg:#F4F6FA;
+    --card:#FFFFFF;
+    --border:#E8EBF0;
+    --danger:#A32D2D;
+    --success:#3B6D11;
+    --radius:10px;
+    --gradient: linear-gradient(135deg, #1A73C8 0%, #00B4D8 100%);
+  }
+  *{box-sizing:border-box;}
+  body{
+    margin:0;
+    font-family:'Segoe UI',system-ui,-apple-system,sans-serif;
+    background:var(--bg);
+    color:var(--ink);
+    -webkit-font-smoothing:antialiased;
+  }
+  a{color:var(--blue-600);}
+  .page{max-width:720px;margin:0 auto;padding:32px 20px 80px;}
+
+  /* Header */
+  .brand{display:flex;align-items:center;justify-content:center;gap:10px;margin-bottom:28px;}
+  .brand-mark{
+    width:38px;height:38px;border-radius:10px;background:var(--gradient);
+    display:flex;align-items:center;justify-content:center;flex-shrink:0;
+  }
+  .brand-mark svg{width:22px;height:22px;}
+  .brand-text{font-weight:800;font-size:19px;letter-spacing:-0.02em;line-height:1.1;}
+  .brand-text span{background:var(--gradient);-webkit-background-clip:text;background-clip:text;color:transparent;}
+
+  .intro{text-align:center;margin-bottom:32px;}
+  .intro h1{font-size:26px;margin:0 0 8px;letter-spacing:-0.02em;}
+  .intro p{color:var(--muted);font-size:15px;margin:0;line-height:1.55;}
+
+  /* Stepper */
+  .stepper{display:flex;align-items:center;justify-content:center;gap:6px;margin-bottom:28px;}
+  .step-dot{width:9px;height:9px;border-radius:50%;background:var(--border);transition:background .25s;}
+  .step-dot.active{background:var(--blue-600);}
+  .step-dot.done{background:var(--cyan-400);}
+  .step-bar{width:34px;height:2px;background:var(--border);}
+  .step-bar.done{background:var(--cyan-400);}
+
+  .step-label{text-align:center;font-size:12px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:var(--blue-600);margin-bottom:14px;}
+
+  /* Card */
+  .card{
+    background:var(--card);
+    border:1px solid var(--border);
+    border-radius:var(--radius);
+    padding:28px 26px;
+    box-shadow:0 1px 3px rgba(15,23,42,.04), 0 8px 24px rgba(15,23,42,.04);
+  }
+  .fieldset{display:none;}
+  .fieldset.active{display:block;animation:fadeIn .3s ease;}
+  @keyframes fadeIn{from{opacity:0;transform:translateY(6px);}to{opacity:1;transform:translateY(0);}}
+
+  .section-title{font-size:15px;font-weight:700;margin:0 0 4px;}
+  .section-sub{font-size:13px;color:var(--muted);margin:0 0 20px;}
+
+  .row{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-bottom:14px;}
+  .row.single{grid-template-columns:1fr;}
+  @media(max-width:560px){.row{grid-template-columns:1fr;}}
+
+  label{display:block;font-size:13px;font-weight:600;margin-bottom:6px;color:var(--ink);}
+  label .opt{font-weight:400;color:var(--muted);}
+  label .req{color:var(--danger);}
+
+  input[type=text],input[type=email],input[type=tel],input[type=url],input[type=number],input[type=date],select,textarea{
+    width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:9px;
+    font-size:14px;font-family:inherit;color:var(--ink);background:#fff;
+    transition:border-color .15s, box-shadow .15s;
+  }
+  textarea{resize:vertical;min-height:80px;}
+  input:focus,select:focus,textarea:focus{
+    outline:none;border-color:var(--blue-500);box-shadow:0 0 0 3px rgba(59,130,246,.15);
+  }
+  .help{font-size:12px;color:var(--muted);margin-top:5px;}
+  .err{font-size:12px;color:var(--danger);margin-top:5px;display:none;}
+  .field.invalid input,.field.invalid select,.field.invalid textarea{border-color:var(--danger);}
+  .field.invalid .err{display:block;}
+
+  .toggle-row{display:flex;align-items:center;gap:10px;margin-bottom:16px;}
+  .toggle-row label{margin:0;}
+
+  .btn-row{display:flex;justify-content:space-between;align-items:center;margin-top:26px;gap:10px;}
+  button{
+    font-family:inherit;font-size:14px;font-weight:700;border:none;border-radius:9px;
+    padding:11px 20px;cursor:pointer;transition:transform .1s, box-shadow .15s, opacity .15s;
+  }
+  button:active{transform:scale(.98);}
+  .btn-primary{background:var(--gradient);color:#fff;box-shadow:0 4px 14px rgba(59,130,246,.3);}
+  .btn-primary:disabled{opacity:.55;cursor:not-allowed;box-shadow:none;}
+  .btn-ghost{background:transparent;color:var(--muted);}
+  .btn-ghost:hover{color:var(--ink);}
+
+  /* Review */
+  .review-group{margin-bottom:18px;}
+  .review-group h3{font-size:12px;text-transform:uppercase;letter-spacing:.06em;color:var(--blue-600);margin:0 0 10px;}
+  .review-line{display:flex;justify-content:space-between;gap:16px;padding:7px 0;border-bottom:1px dashed var(--border);font-size:13.5px;}
+  .review-line:last-child{border-bottom:none;}
+  .review-line .k{color:var(--muted);flex-shrink:0;}
+  .review-line .v{text-align:right;font-weight:600;}
+
+  /* Confirmation */
+  .confirm{text-align:center;padding:20px 6px;}
+  .confirm-icon{
+    width:60px;height:60px;border-radius:50%;background:var(--gradient);
+    display:flex;align-items:center;justify-content:center;margin:0 auto 18px;
+  }
+  .confirm h2{font-size:22px;margin:0 0 10px;}
+  .confirm p{color:var(--muted);font-size:14.5px;line-height:1.6;max-width:440px;margin:0 auto;}
+  .confirm .ref{
+    margin-top:18px;display:inline-block;background:var(--bg);border:1px solid var(--border);
+    border-radius:8px;padding:8px 14px;font-size:13px;font-weight:700;letter-spacing:.03em;
+  }
+
+  .submit-error{
+    display:none;background:#FEF2F2;border:1px solid #FCA5A5;color:#991B1B;
+    border-radius:9px;padding:12px 14px;font-size:13px;margin-top:16px;
+  }
+
+  .footer-note{text-align:center;font-size:12px;color:var(--muted);margin-top:22px;line-height:1.6;}
+</style>
+</head>
+<body>
+<div class="page">
+
+  <div class="brand">
+    <div class="brand-mark">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M12 2L2 7l10 5 10-5-10-5z" stroke="white" stroke-width="1.6" stroke-linejoin="round"/>
+        <path d="M6 9.5V15c0 1.5 2.7 3 6 3s6-1.5 6-3V9.5" stroke="white" stroke-width="1.6"/>
+      </svg>
+    </div>
+    <div class="brand-text">THE PRECEPTOR <span>SITE</span></div>
+  </div>
+
+  <div class="intro" id="introBlock">
+    <h1>Preceptorship Intake Form</h1>
+    <p>Tell us about yourself and your rotation needs. Once submitted, our team will follow up
+      with your preceptorship agreement and invoice.</p>
+  </div>
+
+  <div class="stepper" id="stepper">
+    <div class="step-dot active" data-step="0"></div>
+    <div class="step-bar" data-bar="0"></div>
+    <div class="step-dot" data-step="1"></div>
+    <div class="step-bar" data-bar="1"></div>
+    <div class="step-dot" data-step="2"></div>
+    <div class="step-bar" data-bar="2"></div>
+    <div class="step-dot" data-step="3"></div>
+  </div>
+  <div class="step-label" id="stepLabel">Step 1 of 4 — About You</div>
+
+  <div class="card">
+    <form id="intakeForm" novalidate>
+
+      <!-- STEP 1: About You -->
+      <div class="fieldset active" data-fieldset="0">
+        <div class="section-title">About you</div>
+        <div class="section-sub">Your basic contact information.</div>
+
+        <div class="row">
+          <div class="field">
+            <label>First name <span class="req">*</span></label>
+            <input type="text" id="firstName" required />
+            <div class="err">First name is required.</div>
+          </div>
+          <div class="field">
+            <label>Last name <span class="req">*</span></label>
+            <input type="text" id="lastName" required />
+            <div class="err">Last name is required.</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Email address <span class="req">*</span></label>
+            <input type="email" id="email" required />
+            <div class="err">A valid email is required.</div>
+          </div>
+          <div class="field">
+            <label>Phone number <span class="req">*</span></label>
+            <input type="tel" id="phone" placeholder="(555) 555-5555" required />
+            <div class="err">Phone number is required.</div>
+          </div>
+        </div>
+
+        <div class="row single">
+          <div class="field">
+            <label>Current mailing address <span class="opt">(optional)</span></label>
+            <textarea id="address" rows="2"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 2: Program & Rotation -->
+      <div class="fieldset" data-fieldset="1">
+        <div class="section-title">Program &amp; rotation details</div>
+        <div class="section-sub">Information about your school and the placement you're requesting.</div>
+
+        <div class="row">
+          <div class="field">
+            <label>University / College <span class="req">*</span></label>
+            <input type="text" id="university" required />
+            <div class="err">University is required.</div>
+          </div>
+          <div class="field">
+            <label>Degree / Program <span class="req">*</span></label>
+            <select id="program" required>
+              <option value="">Select one…</option>
+              <option>Family Nurse Practitioner (FNP)</option>
+              <option>Adult-Gerontology NP (AGACNP)</option>
+              <option>Psychiatric-Mental Health NP (PMHNP)</option>
+              <option>Doctor of Nursing Practice (DNP)</option>
+              <option>Other</option>
+            </select>
+            <div class="err">Please select your program.</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Current year / semester <span class="opt">(optional)</span></label>
+            <input type="text" id="yearSemester" placeholder="e.g. Fall 2026, 3rd semester" />
+          </div>
+          <div class="field">
+            <label>Total clinical hours required <span class="req">*</span></label>
+            <input type="number" id="hoursRequired" min="1" required />
+            <div class="err">Please enter the number of hours required.</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>Requested start date <span class="req">*</span></label>
+            <input type="date" id="startDate" required />
+            <div class="err">Start date is required.</div>
+          </div>
+          <div class="field">
+            <label>Requested end date <span class="req">*</span></label>
+            <input type="date" id="endDate" required />
+            <div class="err">End date is required.</div>
+          </div>
+        </div>
+
+        <div class="toggle-row">
+          <input type="checkbox" id="additionalPeriod" style="width:16px;height:16px;" />
+          <label for="additionalPeriod" style="margin:0;font-weight:600;">I need an additional rotation period</label>
+        </div>
+
+        <div class="row" id="additionalDates" style="display:none;">
+          <div class="field">
+            <label>Additional period — start date</label>
+            <input type="date" id="addStartDate" />
+          </div>
+          <div class="field">
+            <label>Additional period — end date</label>
+            <input type="date" id="addEndDate" />
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
+            <label>University supervisor name <span class="opt">(optional)</span></label>
+            <input type="text" id="supervisorName" />
+          </div>
+          <div class="field">
+            <label>University supervisor email <span class="opt">(optional)</span></label>
+            <input type="email" id="supervisorEmail" />
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 3: Documents & Notes -->
+      <div class="fieldset" data-fieldset="2">
+        <div class="section-title">Documents &amp; notes</div>
+        <div class="section-sub">Share links to your resume and school handbook if you have them.</div>
+
+        <div class="row single">
+          <div class="field">
+            <label>Resume link <span class="opt">(optional — Google Drive, Dropbox, etc.)</span></label>
+            <input type="url" id="resumeLink" placeholder="https://" />
+            <div class="help">No link handy? Email your resume to us directly after submitting.</div>
+          </div>
+        </div>
+
+        <div class="row single">
+          <div class="field">
+            <label>School clinical handbook link <span class="opt">(optional)</span></label>
+            <input type="url" id="handbookLink" placeholder="https://" />
+          </div>
+        </div>
+
+        <div class="row single">
+          <div class="field">
+            <label>Clinical focus / objectives <span class="opt">(optional)</span></label>
+            <textarea id="clinicalFocus" rows="3" placeholder="What are you hoping to focus on during this rotation?"></textarea>
+          </div>
+        </div>
+
+        <div class="row single">
+          <div class="field">
+            <label>Anything else we should know? <span class="opt">(optional)</span></label>
+            <textarea id="specialNotes" rows="3"></textarea>
+          </div>
+        </div>
+      </div>
+
+      <!-- STEP 4: Review -->
+      <div class="fieldset" data-fieldset="3">
+        <div class="section-title">Review &amp; submit</div>
+        <div class="section-sub">Double check everything looks right before you submit.</div>
+        <div id="reviewContent"></div>
+        <div class="submit-error" id="submitError"></div>
+      </div>
+
+      <div class="btn-row">
+        <button type="button" class="btn-ghost" id="backBtn" style="visibility:hidden;">← Back</button>
+        <button type="button" class="btn-primary" id="nextBtn">Continue →</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- Confirmation screen (hidden until submit succeeds) -->
+  <div class="card confirm" id="confirmCard" style="display:none;">
+    <div class="confirm-icon">
+      <svg viewBox="0 0 24 24" fill="none" xmlns="http://www.w3.org/2000/svg">
+        <path d="M20 6L9 17l-5-5" stroke="white" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/>
+      </svg>
+    </div>
+    <h2>You're all set!</h2>
+    <p>Thanks for completing your intake form. Our team has received your information and will
+      follow up shortly with your preceptorship agreement and invoice. Keep an eye on your inbox.</p>
+    <div class="ref" id="refId"></div>
+  </div>
+
+  <div class="footer-note">
+    The Preceptor Site · TMM Medical Group · 3520 High Street, Suite 100, Portsmouth, VA 23707<br>
+    Questions before you submit? Reach out to your coordinator directly.
+  </div>
+</div>
+
+<script>
+/* ============================================================
+   This form submits to a Netlify serverless function
+   (/.netlify/functions/intake-submit) instead of talking to
+   Airtable directly. No Airtable token lives in this page at
+   all anymore — it's stored server-side as an environment
+   variable, so there's nothing here for a student to find in
+   page source.
+   ============================================================ */
+
+const steps = [0,1,2,3];
+let currentStep = 0;
+
+const form = document.getElementById('intakeForm');
+const nextBtn = document.getElementById('nextBtn');
+const backBtn = document.getElementById('backBtn');
+const stepLabel = document.getElementById('stepLabel');
+const stepLabels = [
+  "Step 1 of 4 — About You",
+  "Step 2 of 4 — Program & Rotation",
+  "Step 3 of 4 — Documents & Notes",
+  "Step 4 of 4 — Review & Submit"
+];
+
+document.getElementById('additionalPeriod').addEventListener('change', function(){
+  document.getElementById('additionalDates').style.display = this.checked ? 'grid' : 'none';
+});
+
+function showStep(i){
+  document.querySelectorAll('.fieldset').forEach(fs=>{
+    fs.classList.toggle('active', Number(fs.dataset.fieldset) === i);
+  });
+  document.querySelectorAll('.step-dot').forEach(dot=>{
+    const s = Number(dot.dataset.step);
+    dot.classList.toggle('active', s === i);
+    dot.classList.toggle('done', s < i);
+  });
+  document.querySelectorAll('.step-bar').forEach(bar=>{
+    bar.classList.toggle('done', Number(bar.dataset.bar) < i);
+  });
+  stepLabel.textContent = stepLabels[i];
+  backBtn.style.visibility = i === 0 ? 'hidden' : 'visible';
+  nextBtn.textContent = i === 3 ? 'Submit intake form' : 'Continue →';
+  if(i === 3){ buildReview(); }
+  window.scrollTo({top:0, behavior:'smooth'});
+}
+
+function fieldsForStep(i){
+  const map = {
+    0: ['firstName','lastName','email','phone'],
+    1: ['university','program','hoursRequired','startDate','endDate'],
+    2: [],
+    3: []
+  };
+  return map[i] || [];
+}
+
+function validateStep(i){
+  let valid = true;
+  fieldsForStep(i).forEach(id=>{
+    const el = document.getElementById(id);
+    const field = el.closest('.field');
+    let ok = el.value.trim() !== '';
+    if(id === 'email' && ok){ ok = /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(el.value.trim()); }
+    field.classList.toggle('invalid', !ok);
+    if(!ok) valid = false;
+  });
+  // cross-field: end date after start date
+  if(i === 1){
+    const s = document.getElementById('startDate').value;
+    const e = document.getElementById('endDate').value;
+    if(s && e && e < s){
+      document.getElementById('endDate').closest('.field').classList.add('invalid');
+      valid = false;
+    }
+  }
+  return valid;
+}
+
+function buildReview(){
+  const v = id => document.getElementById(id).value.trim();
+  const html = `
+    <div class="review-group">
+      <h3>About You</h3>
+      <div class="review-line"><span class="k">Name</span><span class="v">${v('firstName')} ${v('lastName')}</span></div>
+      <div class="review-line"><span class="k">Email</span><span class="v">${v('email')}</span></div>
+      <div class="review-line"><span class="k">Phone</span><span class="v">${v('phone')}</span></div>
+    </div>
+    <div class="review-group">
+      <h3>Program &amp; Rotation</h3>
+      <div class="review-line"><span class="k">University</span><span class="v">${v('university')}</span></div>
+      <div class="review-line"><span class="k">Program</span><span class="v">${v('program') || '—'}</span></div>
+      <div class="review-line"><span class="k">Hours required</span><span class="v">${v('hoursRequired') || '—'}</span></div>
+      <div class="review-line"><span class="k">Dates</span><span class="v">${v('startDate') || '—'} to ${v('endDate') || '—'}</span></div>
+      ${document.getElementById('additionalPeriod').checked ? `<div class="review-line"><span class="k">Additional period</span><span class="v">${v('addStartDate')||'—'} to ${v('addEndDate')||'—'}</span></div>` : ''}
+    </div>
+    <div class="review-group">
+      <h3>Documents</h3>
+      <div class="review-line"><span class="k">Resume link</span><span class="v">${v('resumeLink') || 'Not provided'}</span></div>
+      <div class="review-line"><span class="k">Handbook link</span><span class="v">${v('handbookLink') || 'Not provided'}</span></div>
+    </div>
+  `;
+  document.getElementById('reviewContent').innerHTML = html;
+}
+
+nextBtn.addEventListener('click', async ()=>{
+  if(currentStep < 3){
+    if(!validateStep(currentStep)) return;
+    currentStep++;
+    showStep(currentStep);
+  } else {
+    if(!validateStep(1)) { currentStep = 1; showStep(1); return; }
+    await submitIntake();
+  }
+});
+
+backBtn.addEventListener('click', ()=>{
+  if(currentStep > 0){ currentStep--; showStep(currentStep); }
+});
+
+function last4(phone){
+  const digits = (phone||'').replace(/\D/g,'');
+  return digits.slice(-4).padStart(4,'0');
+}
+
+async function submitIntake(){
+  const errBox = document.getElementById('submitError');
+  errBox.style.display = 'none';
+  nextBtn.disabled = true;
+  nextBtn.textContent = 'Submitting…';
+
+  const payload = {
+    firstName: document.getElementById('firstName').value.trim(),
+    lastName: document.getElementById('lastName').value.trim(),
+    email: document.getElementById('email').value.trim(),
+    phone: document.getElementById('phone').value.trim(),
+    address: document.getElementById('address').value.trim(),
+    university: document.getElementById('university').value.trim(),
+    program: document.getElementById('program').value,
+    yearSemester: document.getElementById('yearSemester').value.trim(),
+    hoursRequired: document.getElementById('hoursRequired').value,
+    startDate: document.getElementById('startDate').value,
+    endDate: document.getElementById('endDate').value,
+    additionalPeriod: document.getElementById('additionalPeriod').checked,
+    addStartDate: document.getElementById('addStartDate').value,
+    addEndDate: document.getElementById('addEndDate').value,
+    supervisorName: document.getElementById('supervisorName').value.trim(),
+    supervisorEmail: document.getElementById('supervisorEmail').value.trim(),
+    resumeLink: document.getElementById('resumeLink').value.trim(),
+    handbookLink: document.getElementById('handbookLink').value.trim(),
+    clinicalFocus: document.getElementById('clinicalFocus').value.trim(),
+    specialNotes: document.getElementById('specialNotes').value.trim()
+  };
+
+  try{
+    const resp = await fetch('/.netlify/functions/intake-submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(payload)
+    });
+    const data = await resp.json().catch(()=>({}));
+
+    if(!resp.ok || !data.ok){
+      throw new Error(data?.error || `Submission failed (${resp.status})`);
+    }
+
+    document.getElementById('introBlock').style.display = 'none';
+    document.getElementById('stepper').style.display = 'none';
+    stepLabel.style.display = 'none';
+    form.closest('.card').style.display = 'none';
+    document.getElementById('confirmCard').style.display = 'block';
+    document.getElementById('refId').textContent = `Student ID: ${data.studentId}`;
+
+  } catch(err){
+    errBox.textContent = "We couldn't submit your form — " + err.message + ". Please try again, or contact your coordinator directly.";
+    errBox.style.display = 'block';
+    nextBtn.disabled = false;
+    nextBtn.textContent = 'Submit intake form';
+    errBox.scrollIntoView({behavior:'smooth', block:'center'});
+  }
+}
+
+showStep(0);
+</script>
+</body>
+</html>
