@@ -449,7 +449,7 @@
   </div>
   <div class="airtable-config">
     <span class="config-badge" id="sync-status">⚡ Live — Airtable connected</span>
-    <button class="btn btn-sm" onclick="openSettings()">Settings</button>
+    <button class="btn btn-sm" id="settings-btn" onclick="openSettings()">Settings</button>
   </div>
 </div>
 
@@ -1277,6 +1277,11 @@ function showApp(role) {
     }
     // Store login type so lookupStudent knows whether to search by email or ID
     window._studentLoginType = sessionStorage.getItem('tps_student_login_type') || 'email';
+    // Students have nothing to configure — hide Settings and the sync badge entirely
+    const settingsBtn = document.getElementById('settings-btn');
+    const syncStatus = document.getElementById('sync-status');
+    if (settingsBtn) settingsBtn.style.display = 'none';
+    if (syncStatus) syncStatus.style.display = 'none';
     // Show sign-out in topbar
     addSignOutButton();
     loadSessions();
@@ -1287,6 +1292,10 @@ function showApp(role) {
       if (tab.textContent.includes('Staff')) tab.classList.add('active');
     });
     document.getElementById('page-staff').classList.add('active');
+    const settingsBtn = document.getElementById('settings-btn');
+    const syncStatus = document.getElementById('sync-status');
+    if (settingsBtn) settingsBtn.style.display = '';
+    if (syncStatus) syncStatus.style.display = '';
     addSignOutButton();
     loadSessions();
     loadStudentDirectory();
