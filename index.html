@@ -479,15 +479,11 @@
       <div class="setup-banner-icon">✉️</div>
       <div class="setup-banner-text">
         <strong>How email notifications work</strong>
-        This app uses the Claude API to compose and send beautifully formatted emails on your behalf. Provide your Anthropic API key and the coordinator's "from" email address below. No third-party email service needed.
+        This app uses the Claude API (connected securely on the server) to compose beautifully formatted emails, which you review and send yourself. Just set the coordinator's "from" email address below.
       </div>
     </div>
 
     <div class="form-grid" style="margin-bottom:14px">
-      <div class="form-group">
-        <label>Anthropic API Key</label>
-        <input type="password" id="anthropic-key" placeholder="sk-ant-..." />
-      </div>
       <div class="form-group">
         <label>Coordinator "From" Email</label>
         <input type="email" id="from-email" placeholder="coordinator@thepreceptorsite.com" />
@@ -1405,8 +1401,6 @@ let signoffRecord = null;
 // ── SETTINGS ──────────────────────────────────────────
 function openSettings() {
   document.getElementById('settings-modal').classList.add('open');
-  const ak = localStorage.getItem('anthropic_key') || '';
-  if(ak) document.getElementById('anthropic-key').value = ak;
   document.getElementById('from-email').value = localStorage.getItem('from_email') || '';
   document.getElementById('from-name').value = localStorage.getItem('from_name') || '';
   document.getElementById('clinic-name').value = localStorage.getItem('clinic_name') || '';
@@ -1419,8 +1413,6 @@ function openSettings() {
 }
 function closeSettings() { document.getElementById('settings-modal').classList.remove('open'); }
 function saveSettings() {
-  const ak = document.getElementById('anthropic-key').value.trim();
-  if (ak) localStorage.setItem('anthropic_key', ak);
   localStorage.setItem('from_email', document.getElementById('from-email').value.trim());
   localStorage.setItem('from_name', document.getElementById('from-name').value.trim() || 'The Preceptor Site');
   localStorage.setItem('clinic_name', document.getElementById('clinic-name').value.trim() || 'TMM Medical Group');
@@ -1435,10 +1427,16 @@ function saveSettings() {
   document.getElementById('sync-status').textContent = '⚡ Live — Airtable + Email connected';
 }
 
+/* Used as the destination for student-triggered notifications (Message
+   Coordinator, document submissions, cancellation requests) when the
+   browser has no staff Settings saved — e.g. a student's own device.
+   Set this to your real inbox. */
+const COORDINATOR_FALLBACK_EMAIL = 'coordinator@thepreceptorsite.com';
+
 function getEmailConfig() {
+  const savedFromEmail = localStorage.getItem('from_email') || '';
   return {
-    anthropicKey: localStorage.getItem('anthropic_key') || '',
-    fromEmail: localStorage.getItem('from_email') || '',
+    fromEmail: savedFromEmail || COORDINATOR_FALLBACK_EMAIL,
     fromName: localStorage.getItem('from_name') || 'The Preceptor Site',
     clinicName: localStorage.getItem('clinic_name') || 'TMM Medical Group',
     notifyNewRequest: localStorage.getItem('notify_new_request') !== 'false',
@@ -1449,40 +1447,21 @@ function getEmailConfig() {
   };
 }
 
+function hasValidCoordinatorEmail(cfg) {
+  return !!cfg.fromEmail && !cfg.fromEmail.startsWith('PASTE_');
+}
+
 async function sendEmailViaClaudeAPI(toEmail, subject, bodyText) {
   const cfg = getEmailConfig();
-  if (!cfg.anthropicKey) {
-    showEmailToast('No Anthropic key configured. Open Settings to add your key.', 'warn');
-    return false;
-  }
   try {
-    const prompt = `You are an email notification assistant for The Preceptor Site / ${cfg.clinicName}.
-
-Compose a professional, warm plain-text email notification:
-
-TO: ${toEmail}
-SUBJECT: ${subject}
-
-CONTENT TO INCLUDE:
-${bodyText}
-
-Return ONLY a JSON object (no markdown, no backticks, no preamble) with exactly this structure:
-{"subject":"${subject}","text":"full plain text email body here"}
-
-Sign the email from: ${cfg.fromName}
-Include footer: The Preceptor Site | ${cfg.clinicName} | 3520 High Street, Suite 100, Portsmouth, VA 23707
-Keep the tone warm and professional. Do not add information not listed above.`;
-
-    const r = await fetch('https://api.anthropic.com/v1/messages', {
+    const r = await fetch('/.netlify/functions/compose-email', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-api-key': cfg.anthropicKey, 'anthropic-version': '2023-06-01' },
-      body: JSON.stringify({ model: 'claude-sonnet-4-6', max_tokens: 1000, messages: [{ role: 'user', content: prompt }] })
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ toEmail, subject, bodyText, fromName: cfg.fromName, clinicName: cfg.clinicName })
     });
     const data = await r.json();
-    if (!r.ok) throw new Error(data.error?.message || 'Claude API error');
-    const raw = (data.content?.[0]?.text || '').replace(/```json|```/g, '').trim();
-    const parsed = JSON.parse(raw);
-    showEmailPanel(toEmail, subject, parsed.text || bodyText);
+    if (!r.ok || !data.ok) throw new Error(data?.error || 'Email composition failed');
+    showEmailPanel(toEmail, data.subject || subject, data.text || bodyText);
     return true;
   } catch(e) {
     console.error('Email error:', e);
@@ -1531,8 +1510,7 @@ function showEmailToast(msg, type) {
 
 async function sendTestEmail() {
   const cfg = getEmailConfig();
-  if (!cfg.anthropicKey) { alert('Please enter your Anthropic API key first.'); return; }
-  if (!cfg.fromEmail) { alert('Please enter a coordinator email address.'); return; }
+  if (!hasValidCoordinatorEmail(cfg)) { alert('Please enter a coordinator email address first.'); return; }
   await sendEmailViaClaudeAPI(cfg.fromEmail,
     'Test — The Preceptor Site Scheduler is connected',
     'This is a test notification confirming your clinical hours scheduler is connected and email notifications are working correctly.\n\nYour Airtable Sessions base is live and ready to receive session requests from students.\n\nNo action needed — this is just a test.');
@@ -2197,7 +2175,7 @@ function submitDoc(key, label, url) {
   setTimeout(() => msg.style.display = 'none', 4000);
   // Also notify coordinator via email
   const cfg = getEmailConfig();
-  if (cfg.anthropicKey && cfg.fromEmail) {
+  if (hasValidCoordinatorEmail(cfg)) {
     sendEmailViaClaudeAPI(cfg.fromEmail,
       `Document submitted: ${label} — ${window._studentPortalName}`,
       `${window._studentPortalName} has submitted a document link for coordinator review.
@@ -2238,7 +2216,7 @@ function submitContactUpdate() {
   if (supervisor) changes.push(`Supervisor: ${supervisor}`);
   if (supEmail) changes.push(`Supervisor email: ${supEmail}`);
   const cfg = getEmailConfig();
-  if (cfg.anthropicKey && cfg.fromEmail) {
+  if (hasValidCoordinatorEmail(cfg)) {
     sendEmailViaClaudeAPI(cfg.fromEmail,
       `Contact info update request — ${window._studentPortalName}`,
       `${window._studentPortalName} has requested the following contact information updates:
@@ -2267,7 +2245,7 @@ function sendStudentMessage() {
   if (!subject) { alert('Please select a subject.'); return; }
   if (!text) { alert('Please enter a message.'); return; }
   const cfg = getEmailConfig();
-  if (cfg.anthropicKey && cfg.fromEmail) {
+  if (hasValidCoordinatorEmail(cfg)) {
     sendEmailViaClaudeAPI(cfg.fromEmail,
       `Student message: ${subject} — ${window._studentPortalName}`,
       `You have a new message from ${window._studentPortalName}.
@@ -2292,7 +2270,7 @@ Reply directly to the student at: ${window._studentPortalEmail}`
 function requestCancelSession(sessionId, sessionDate, sessionFocus) {
   if (!confirm(`Request to cancel your session on ${sessionDate}?\n\nThis will notify your coordinator — do not assume the session is cancelled until you hear back.`)) return;
   const cfg = getEmailConfig();
-  if (cfg.anthropicKey && cfg.fromEmail) {
+  if (hasValidCoordinatorEmail(cfg)) {
     sendEmailViaClaudeAPI(cfg.fromEmail,
       `Session cancellation request — ${window._studentPortalName} — ${sessionDate}`,
       `${window._studentPortalName} has requested to cancel a session.
