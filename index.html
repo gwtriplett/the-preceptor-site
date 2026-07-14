@@ -3070,7 +3070,6 @@ function openStudentModalById(id) {
 
 function openStudentModal(event, student) {
   if (event) event.stopPropagation();
-  event.stopPropagation();
   _currentStudent = student;
   const m = document.getElementById('student-detail-modal');
 
@@ -3112,8 +3111,11 @@ function closeStudentModal() {
 }
 
 // Close on backdrop click
-document.getElementById('student-detail-modal').addEventListener('click', function(e) {
-  if (e.target === this) closeStudentModal();
+document.addEventListener('DOMContentLoaded', function() {
+  const sdm = document.getElementById('student-detail-modal');
+  if (sdm) sdm.addEventListener('click', function(e) {
+    if (e.target === this) closeStudentModal();
+  });
 });
 
 function fmtDateSdm(val) {
