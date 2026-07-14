@@ -193,7 +193,7 @@
   /* MONTH GRID */
   .month-grid { display:grid; grid-template-columns:repeat(7,1fr); border:1px solid var(--gray-100); border-radius:var(--radius); overflow:hidden; background:var(--white); }
   .month-dow { text-align:center; padding:8px 4px; font-size:11px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; background:var(--gray-50); border-bottom:1px solid var(--gray-100); }
-  .month-cell { min-height:170px; border-right:1px solid var(--gray-100); border-bottom:1px solid var(--gray-100); padding:6px; vertical-align:top; position:relative; }
+  .month-cell { min-height:150px; border-right:1px solid var(--gray-100); border-bottom:1px solid var(--gray-100); padding:6px; vertical-align:top; position:relative; }
   .month-cell:nth-child(7n) { border-right:none; }
   .month-cell.other-month .cal-day-num { color:var(--gray-400); }
   .month-cell.today { background:var(--blue-light); }
@@ -244,13 +244,21 @@
 
   /* PRINT */
   @media print {
+    @page { size: landscape; margin: 0.35in; }
     .topbar, .stats-row, .tabs, .filter-bar, .cal-toolbar .btn, .cal-toolbar .cal-view-tabs, .mode-tabs, .airtable-config { display:none !important; }
     .main { padding:0; max-width:100%; }
-    body { background:white; font-size:12px; }
+    body { background:white; font-size:12px; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
     .card { border:none; box-shadow:none; }
-    .print-header { display:block !important; }
-    .month-cell { min-height:130px; }
-    .cal-event { font-size:10px; }
+    .print-header { display:block !important; margin-bottom:6px; }
+    .print-header h1 { font-size:16px; margin:0 0 2px; }
+    .print-header p { font-size:11px; margin:0; }
+    .cal-legend { font-size:9px; margin-top:4px; }
+    .month-grid { page-break-inside: avoid; break-inside: avoid; }
+    .month-dow { padding:3px 4px; font-size:9px; }
+    .month-cell { min-height:100px; padding:4px; page-break-inside: avoid; break-inside: avoid; }
+    .cal-day-num { font-size:9px; margin-bottom:2px; }
+    .cal-event { font-size:8px; padding:1px 4px; margin-bottom:1px; line-height:1.15; -webkit-print-color-adjust:exact; print-color-adjust:exact; }
+    .cal-more { font-size:8px; }
     .page-staff .tabs ~ * { display:none; }
     #cal-page { display:block !important; }
   }
@@ -2929,10 +2937,10 @@ function renderMonth() {
     const sessions = sessionsOnDate(ds);
     const isToday = ds === todayStr;
     html += `<div class="month-cell${isToday?' today':''}"><div class="cal-day-num">${day}</div>`;
-    sessions.slice(0,6).forEach(s => {
+    sessions.slice(0,5).forEach(s => {
       html += `<div class="cal-event ${statusClass(s['Approval Status'])}" title="${s['Student Name']} | ${s['Start Time']||''}-${s['End Time']||''} | ${s['Clinical Focus']||''}">${s['Student Name']}</div>`;
     });
-    if (sessions.length > 6) html += `<div class="cal-more">+${sessions.length-6} more</div>`;
+    if (sessions.length > 5) html += `<div class="cal-more">+${sessions.length-5} more</div>`;
     html += '</div>';
   }
 
