@@ -987,10 +987,48 @@
         <thead><tr>
           <th>Student</th><th>ID</th><th>University</th>
           <th>Hours Req.</th><th>Prior Hrs</th><th>Hours Done</th><th>Remaining</th><th>Progress</th>
-          <th>Billed</th><th>Amount Paid</th><th>Balance</th><th>Admission Status</th>
+          <th>Billed</th><th>Amount Paid</th><th>Balance</th><th>Admission Status</th><th></th>
         </tr></thead>
         <tbody id="rev-tbody"><tr><td colspan="12" style="text-align:center;padding:24px;color:var(--text-muted)">Connect Airtable to load data</td></tr></tbody>
       </table>
+    </div>
+  </div>
+</div>
+
+
+<!-- ════════════════════════════════ STUDENT DETAIL MODAL ════════════════════════════════ -->
+<div id="student-detail-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2000;overflow-y:auto;padding:30px 20px;">
+  <div style="max-width:720px;margin:0 auto;background:var(--white);border-radius:12px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.18);">
+
+    <!-- Modal Header -->
+    <div style="background:var(--tps-grad);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div id="sdm-name" style="font-size:17px;font-weight:700;color:#fff;"></div>
+        <div id="sdm-sub" style="font-size:12px;color:rgba(255,255,255,0.8);margin-top:2px;"></div>
+      </div>
+      <button onclick="closeStudentModal()" style="background:rgba(255,255,255,0.2);border:none;color:white;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:14px;">✕ Close</button>
+    </div>
+
+    <!-- Student Info Summary -->
+    <div id="sdm-info" style="padding:16px 24px;border-bottom:1px solid var(--gray-100);display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;"></div>
+
+    <!-- Email Composer -->
+    <div style="padding:16px 24px 20px 24px;">
+      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px;">✉️ Send Email</div>
+
+      <!-- PayPal link input -->
+      <div style="display:flex;align-items:center;gap:8px;margin-bottom:12px;background:var(--blue-light);border:1px solid #C2D9F0;border-radius:8px;padding:8px 12px;">
+        <label style="font-size:12px;color:var(--blue-dark);white-space:nowrap;font-weight:500;">PayPal Invoice Link:</label>
+        <input id="sdm-paypal" type="text" placeholder="Paste PayPal link here (used in Email 3 — Agreement Signed)"
+          style="flex:1;padding:5px 8px;border:1px solid var(--gray-100);border-radius:6px;font-size:12px;color:var(--text);" />
+      </div>
+
+      <!-- Button groups -->
+      <div id="sdm-email-buttons" style="display:flex;flex-direction:column;gap:10px;"></div>
+
+      <div style="margin-top:12px;font-size:11px;color:var(--text-muted);font-style:italic;">
+        Clicking any button opens a pre-filled Gmail compose window. Review before sending.
+      </div>
     </div>
   </div>
 </div>
@@ -2606,6 +2644,9 @@ async function renderRevenuePage() {
         <td style="font-weight:600;text-align:right;color:${paid > 0 ? 'var(--green)' : 'var(--text-muted)'}">${paid > 0 ? fmt(paid) : '—'}</td>
         <td style="font-weight:700;text-align:right;color:${balColor}">${balance > 0 ? fmt(balance) : fullyPaid ? '<span style="color:var(--green)">✓ Paid in full</span>' : '—'}</td>
         <td style="font-size:11px;color:var(--text-muted)">${admStatus}</td>
+        <td>
+          <button class="btn btn-sm btn-primary" onclick="openStudentModal(event, ${JSON.stringify(s)})" style="white-space:nowrap;">✉ Email</button>
+        </td>
       </tr>`;
     }).join('');
   } catch(e) {
@@ -3010,6 +3051,444 @@ function printCalendar() {
   window.print();
   setTimeout(() => document.title = 'The Preceptor Site — Clinical Hours Scheduler', 2000);
 }
+
+// ════════════════════════════════════════════════════════════════
+// EMAIL COMPOSER — Student Detail Modal
+// ════════════════════════════════════════════════════════════════
+
+let _currentStudent = null;
+
+function openStudentModal(event, student) {
+  event.stopPropagation();
+  _currentStudent = student;
+  const m = document.getElementById('student-detail-modal');
+
+  // Header
+  document.getElementById('sdm-name').textContent = student['Student Name'] || '—';
+  document.getElementById('sdm-sub').textContent =
+    [student['Degree / Program'], student['University / College']].filter(Boolean).join(' · ');
+
+  // Info grid
+  const f = student;
+  const infoRows = [
+    ['Student ID',     f['Student ID'] || '—'],
+    ['Email',          f['Email'] || '—'],
+    ['Phone',          f['Phone Number'] || '—'],
+    ['Start Date',     fmtDateSdm(f['Requested Start Date'])],
+    ['End Date',       fmtDateSdm(f['Requested End Date'])],
+    ['Total Hours',    (f['Total Hours Required'] || '—') + ' hrs'],
+    ['Billed',         fmtMoneySdm(f['Billed Amount'])],
+    ['Amount Paid',    fmtMoneySdm(f['Amount Paid'])],
+    ['Payment Date',   fmtDateSdm(f['Payment Received Date'])],
+    ['Status',         (Array.isArray(f['Admission Status'])
+      ? f['Admission Status'].map(v => typeof v === 'object' ? v.name : v).join(', ')
+      : f['Admission Status']) || '—'],
+  ];
+  document.getElementById('sdm-info').innerHTML = infoRows.map(([l,v]) =>
+    `<div><span style="color:var(--text-muted);font-size:11px;font-weight:500;text-transform:uppercase;">${l}</span><br><span style="font-weight:600;color:var(--text)">${v}</span></div>`
+  ).join('');
+
+  // Email buttons
+  renderSdmEmailButtons(student);
+
+  m.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+}
+
+function closeStudentModal() {
+  document.getElementById('student-detail-modal').style.display = 'none';
+  document.body.style.overflow = '';
+}
+
+// Close on backdrop click
+document.getElementById('student-detail-modal').addEventListener('click', function(e) {
+  if (e.target === this) closeStudentModal();
+});
+
+function fmtDateSdm(val) {
+  if (!val) return '—';
+  const d = new Date(val + 'T00:00:00');
+  return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+function fmtMoneySdm(val) {
+  if (!val) return '—';
+  return '$' + Number(val).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+}
+
+function calcTotalSdm(s) {
+  const hours = s['Total Hours Required'];
+  if (!hours) return '[Amount]';
+  return '$' + (Number(hours) * 10).toFixed(2).replace(/\B(?=(\d{3})+(?!\d))/g, ',');
+}
+
+function buildEmailsSdm(s, paypalLink) {
+  const firstName  = s['First Name'] || (s['Student Name'] || '').split(' ')[0] || '[Student First Name]';
+  const fullName   = s['Student Name'] || '[Student Full Name]';
+  const university = s['University / College'] || '[University]';
+  const program    = s['Degree / Program'] || '[Program]';
+  const studentId  = s['Student ID'] || '[YY-XXXX]';
+  const startDate  = fmtDateSdm(s['Requested Start Date']) || '[Start Date]';
+  const endDate    = fmtDateSdm(s['Requested End Date']) || '[End Date]';
+  const hours      = s['Total Hours Required'] || '[X]';
+  const billed     = s['Billed Amount'] ? fmtMoneySdm(s['Billed Amount']) : calcTotalSdm(s);
+  const payDate    = fmtDateSdm(s['Payment Received Date']) || '[Payment Date]';
+  const paypal     = paypalLink || '[INSERT PAYPAL INVOICE LINK]';
+  const toEmail    = s['Email'] || '';
+
+  const sig = `Warm regards,
+Gerald
+Preceptorship Coordinator — The Preceptor Site
+3520 High Street, Suite 100 | Portsmouth, VA 23707
+Questions? Simply reply to this email and we will get back to you promptly.`;
+
+  const clinicInfo = `TMM Medical Group — The Preceptor Site
+3520 High Street, Suite 100 | Portsmouth, VA 23707
+Phone: (757) 977-9675 | Fax: (757) 483-8099
+
+Clinic Hours:
+Monday – Thursday: 8:00 AM – 5:00 PM
+Friday: 10:00 AM – 3:00 PM
+Saturday – Sunday: Closed`;
+
+  return [
+    {
+      label: '📧 1. Initial Outreach', group: 'Onboarding',
+      subject: 'Preceptorship Request — Next Steps | The Preceptor Site / TMM Medical Group',
+      body: `Hi ${firstName},
+
+My name is Gerald, and I serve as the Preceptorship Coordinator for The Preceptor Site, a division of TMM Medical Group. I am reaching out on behalf of Dr. Cooper, our lead preceptor, who oversees all clinical placements here at our practice.
+
+We do offer paid preceptorships, and I am happy to let you know that we can likely accommodate your requested dates. Here are a few things to know up front:
+
+- We charge $10 per clinical hour for our preceptorship program.
+- We have an affiliation agreement on file with most universities.
+- Dr. Cooper generally likes to meet with students beforehand — to introduce himself, walk you through our team and clinic, and confirm your specific dates before we finalize everything.
+
+If you are still interested in partnering with us, please take a moment to complete the form below so we can properly process your request:
+
+https://thepreceptorsite.netlify.app/intake
+
+Once we receive your form, we will follow up with next steps, including your preceptorship agreement and invoice.
+
+Do not hesitate to reach out if you have any questions. We look forward to supporting you on your journey to becoming a Nurse Practitioner!
+
+${sig}`, toEmail
+    },
+    {
+      label: '📋 2. Post-Form Follow-Up', group: 'Onboarding',
+      subject: 'Your Preceptorship Request Has Been Received — Agreement & Invoice On the Way',
+      body: `Hi ${firstName},
+
+Thank you for completing your intake form — we have received your information and are excited to move forward with your preceptorship here at The Preceptor Site at TMM Medical Group!
+
+─────────────────────────────
+WHAT HAPPENS NEXT
+─────────────────────────────
+
+1. AGREEMENT FOR REVIEW & SIGNATURE
+
+We will be sending you a Preceptorship Agreement via DocuSign shortly. Please review it carefully before signing. Key terms include:
+
+- Preceptorship fee: $10 per clinical hour, due in full before your start date.
+- 14-day written notice is required if you need to cancel or terminate.
+- Professional liability insurance is required: minimum $1,000,000 per occurrence / $6,000,000 aggregate.
+- Payment is non-refundable once the preceptorship begins.
+
+2. INVOICE FOR PAYMENT
+
+An invoice will accompany your agreement reflecting the total number of hours requested and the corresponding fee. Payment must be received in full prior to your start date. Please note that all payments are non-refundable once submitted.
+
+3. INTRODUCTORY MEETING WITH DR. COOPER
+
+Dr. Cooper likes to personally connect with each student before the preceptorship begins. If you have not yet had a chance to speak with Dr. Cooper, please let me know and I will be happy to arrange that for you.
+
+4. BEFORE YOU ARRIVE
+
+Prior to your first day, you will also need to provide the following:
+
+- Proof of professional liability insurance meeting our minimum requirements.
+- Documented proof of a current criminal background check.
+- Evidence of health immunity as required by TMM Medical Group policy.
+- Your written learning objectives for the preceptor experience.
+
+─────────────────────────────
+
+Please do not hesitate to reach out at any time. We truly look forward to supporting your growth as a future Nurse Practitioner and welcoming you to our team!
+
+${sig}`, toEmail
+    },
+    {
+      label: '✍️ 3. Agreement Signed — Invoice', group: 'Onboarding',
+      subject: 'Agreement Received — One Step Remaining | The Preceptor Site',
+      body: `Hi ${firstName},
+
+Great news — we have received your signed Preceptorship Agreement. Thank you for completing that step so promptly!
+
+You are almost ready to get started. There is just one remaining item before your preceptorship can be confirmed:
+
+Your invoice for ${hours} hours x $10/hour = ${billed} has been sent separately. Per the terms of your agreement, payment must be received in full before your preceptorship start date.
+
+You may submit your payment via the link below:
+${paypal}
+
+─────────────────────────────
+A QUICK RECAP OF YOUR PRECEPTORSHIP
+─────────────────────────────
+Student:      ${fullName}
+Program:      ${program}
+University:   ${university}
+Start Date:   ${startDate}
+End Date:     ${endDate}
+Total Hours:  ${hours} hours
+Amount Due:   ${billed}
+─────────────────────────────
+
+STILL NEED TO SUBMIT?
+
+If you have not yet provided the following pre-arrival documents, please do so as soon as possible:
+
+- Proof of professional liability insurance ($1M per occurrence / $6M aggregate minimum).
+- Documented criminal background check.
+- Evidence of health immunity as required by TMM Medical Group.
+- Your written learning objectives for the preceptor experience.
+
+${sig}`, toEmail
+    },
+    {
+      label: '✅ 4. Payment Confirmed — All Set!', group: 'Onboarding',
+      subject: "Payment Confirmed — You're All Set for Your Preceptorship! | The Preceptor Site",
+      body: `Hi ${firstName},
+
+Wonderful news — your payment has been received and your preceptorship is now fully confirmed. We are thrilled to welcome you to The Preceptor Site at TMM Medical Group!
+
+Payment Confirmed: ${billed} received on ${payDate}.
+
+If you require additional proof of payment for your records, please do not hesitate to reach out and I will be happy to provide that for you.
+
+─────────────────────────────
+YOUR CONFIRMED PRECEPTORSHIP DETAILS
+─────────────────────────────
+Student:      ${fullName}
+Program:      ${program}
+University:   ${university}
+Preceptor:    Dr. Cooper — TMM Medical Group
+Start Date:   ${startDate}
+End Date:     ${endDate}
+Total Hours:  ${hours} hours
+Location:     3520 High Street, Suite 100 — Portsmouth, VA 23707
+─────────────────────────────
+
+DAY ONE REMINDERS
+
+- Bring your photo ID badge and wear it visibly at all times while on-site.
+- Dress in accordance with TMM Medical Group's dress code policy.
+- Arrive on time for your scheduled shift and check in with the front desk.
+- If you have not yet submitted your insurance certificate, background check, or immunity documents, please do so before your start date.
+- Your written learning objectives should have been shared with Dr. Cooper ahead of your first day.
+
+─────────────────────────────
+SCHEDULING YOUR DAYS
+─────────────────────────────
+
+Our default clinical hours for preceptorship are Monday through Friday. Monday through Thursday, the clinic is open 8:00 AM – 5:00 PM and you can expect to be scheduled for 8 clinical hours outside of your break time. On Fridays, the clinic is open 10:00 AM – 3:00 PM, earning you 5 clinical hours for the day.
+
+If you have any scheduling preferences, requests, or deviations from this schedule, please let me know in advance so I can coordinate with Dr. Cooper and the team onsite accordingly.
+
+─────────────────────────────
+
+This is an exciting milestone in your journey to becoming a Nurse Practitioner, and the entire team at TMM Medical Group is glad to be a part of it. If there is ever anything you need, please do not hesitate to reply.
+
+${sig}`, toEmail
+    },
+    {
+      label: '🔄 5. Returning Student', group: 'Returning',
+      subject: "Welcome Back — Let's Get Your Next Rotation Scheduled | The Preceptor Site",
+      body: `Hi ${firstName},
+
+Thank you so much for choosing to continue your clinical training with The Preceptor Site at TMM Medical Group — we truly appreciate your trust in us and are glad to have you back!
+
+To get your next rotation period set up, please reply with the following filled in:
+
+Full Name:
+University / Program:
+Rotation Start Date:
+Rotation End Date:
+Total Hours Needed:
+Specialty / Rotation Type:
+Schedule Restrictions:
+
+Or, if your school has not yet finalized your next rotation period, simply reply with your anticipated date range, approximate hours, and any scheduling preferences and we will hold your spot.
+
+Once we hear back from you, same process as before — new DocuSign agreement, new invoice, then confirmation.
+
+${sig}`, toEmail
+    },
+    {
+      label: '🚫 6. Deferral / Cancellation', group: 'Returning',
+      subject: "We've Noted Your Request — Wishing You the Best | The Preceptor Site",
+      body: `Hi ${firstName},
+
+Thank you for reaching out to let us know. We completely understand that life, school schedules, and program requirements do not always go as planned, and we appreciate you taking the time to notify us.
+
+We have updated our records to reflect your [deferral / cancellation] and have noted the details of your original request below for reference.
+
+─────────────────────────────
+YOUR ORIGINAL REQUEST ON FILE
+─────────────────────────────
+Student:          ${fullName}
+University:       ${university}
+Program Type:     ${program}
+Requested Start:  ${startDate}
+Requested End:    ${endDate}
+Hours Requested:  ${hours} hours
+Student ID:       ${studentId}
+Status:           Deferred / Cancelled — [Date]
+─────────────────────────────
+
+As outlined in your Preceptorship Agreement, all payments made prior to the start of a preceptorship are non-refundable. If you have questions about your specific situation, please do not hesitate to reach out.
+
+Becoming a Nurse Practitioner is no small undertaking, and we have nothing but respect for the dedication and hard work it takes to get there. When the time is right, we would love to hear from you. Your information will remain on file.
+
+We wish you all the best on your journey, ${firstName}. Take good care, and please know our door is always open.
+
+${sig}`, toEmail
+    },
+    {
+      label: '⏰ 7. Two Week Reminder', group: 'Reminders',
+      subject: 'Your Preceptorship Starts in 2 Weeks — A Few Reminders | The Preceptor Site',
+      body: `Hi ${firstName},
+
+Just a friendly reminder that your preceptorship at The Preceptor Site at TMM Medical Group is coming up in two weeks, starting on ${startDate}. We are looking forward to having you!
+
+Please make sure the following are in order before your first day:
+
+- Proof of professional liability insurance ($1M per occurrence / $6M aggregate minimum).
+- Documented criminal background check.
+- Evidence of health immunity as required by TMM Medical Group.
+- Your written learning objectives for the preceptor experience.
+
+If you have already submitted these, you are all set!
+
+─────────────────────────────
+${clinicInfo}
+─────────────────────────────
+
+${sig}`, toEmail
+    },
+    {
+      label: '⏰ 8. One Week Reminder', group: 'Reminders',
+      subject: 'One Week Until Your Preceptorship Begins | The Preceptor Site',
+      body: `Hi ${firstName},
+
+Your preceptorship at The Preceptor Site at TMM Medical Group is just one week away — starting ${startDate}. We are excited to welcome you to the team!
+
+Quick check-in before you start:
+
+- All required documents submitted (insurance, background check, immunity records, learning objectives).
+- Any scheduling preferences or conflicts communicated to Gerald in advance.
+- Questions about your first day addressed before you arrive.
+
+If there is anything outstanding, please reply right away so we can get it sorted.
+
+─────────────────────────────
+${clinicInfo}
+─────────────────────────────
+
+See you soon!
+
+${sig}`, toEmail
+    },
+    {
+      label: '⏰ 9. Three Day Reminder', group: 'Reminders',
+      subject: "3 Days to Go — We'll See You Soon! | The Preceptor Site",
+      body: `Hi ${firstName},
+
+Your preceptorship at The Preceptor Site at TMM Medical Group kicks off in just 3 days on ${startDate} — we cannot wait to have you!
+
+Last-minute reminders:
+
+- Plan to arrive on time and check in with the front desk.
+- Wear your photo ID badge visibly at all times while on-site.
+- Dress in accordance with TMM Medical Group's dress code policy.
+- Clinical hours: Monday – Thursday 8:00 AM – 5:00 PM (8 hrs) · Fridays 10:00 AM – 3:00 PM (5 hrs).
+
+─────────────────────────────
+${clinicInfo}
+─────────────────────────────
+
+We are looking forward to seeing you on ${startDate}!
+
+${sig}`, toEmail
+    },
+    {
+      label: '👋 10. Nudge — No Application Yet', group: 'Nudges',
+      subject: "Still Interested? We'd Love to Have You | The Preceptor Site",
+      body: `Hi ${firstName},
+
+I wanted to follow up on your recent inquiry about our preceptorship program here at The Preceptor Site at TMM Medical Group. We noticed we have not yet received your application and wanted to make sure you had everything you need to get started.
+
+When you are ready, you can complete your intake form here:
+
+https://thepreceptorsite.netlify.app/intake
+
+If you have any questions, or if your plans have changed, please do not hesitate to let me know.
+
+${sig}`, toEmail
+    },
+    {
+      label: '✍️ 11. Nudge — Agreement Not Signed', group: 'Nudges',
+      subject: 'Your Preceptorship Agreement is Waiting — Action Needed | The Preceptor Site',
+      body: `Hi ${firstName},
+
+Just a friendly reminder that your Preceptorship Agreement has been sent via DocuSign and is still waiting for your signature. Please take a moment to review and sign at your earliest convenience.
+
+Can't find the DocuSign email? Please check your spam or junk folder. You can also reply to this email and I will resend it right away.
+
+${sig}`, toEmail
+    },
+  ];
+}
+
+function renderSdmEmailButtons(student) {
+  const container = document.getElementById('sdm-email-buttons');
+  const groups = ['Onboarding', 'Returning', 'Reminders', 'Nudges'];
+  const groupColors = { Onboarding: '#1A73C8', Returning: '#5A3E9B', Reminders: '#1A7A30', Nudges: '#B45C00' };
+
+  container.innerHTML = groups.map(group => {
+    const emails = buildEmailsSdm(student, '');
+    const btns = emails.filter(e => e.group === group);
+    if (!btns.length) return '';
+    return `
+      <div>
+        <div style="font-size:11px;font-weight:600;color:${groupColors[group]};text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">${group}</div>
+        <div style="display:flex;flex-wrap:wrap;gap:6px;">
+          ${btns.map((e, i) => `
+            <button onclick="sendSdmEmail('${group}', ${emails.indexOf(e)})"
+              style="padding:7px 13px;background:#fff;border:1.5px solid ${groupColors[group]};border-radius:20px;color:${groupColors[group]};font-size:12px;cursor:pointer;font-family:inherit;transition:all 0.15s;"
+              onmouseover="this.style.background='${groupColors[group]}';this.style.color='#fff';"
+              onmouseout="this.style.background='#fff';this.style.color='${groupColors[group]}';">
+              ${e.label}
+            </button>`).join('')}
+        </div>
+      </div>`;
+  }).join('');
+}
+
+function sendSdmEmail(group, idx) {
+  const s = _currentStudent;
+  if (!s) return;
+  const paypal = document.getElementById('sdm-paypal')?.value?.trim() || '';
+  const emails = buildEmailsSdm(s, paypal);
+  const email = emails[idx];
+  if (!email) return;
+  const url = 'https://mail.google.com/mail/?view=cm&fs=1' +
+    '&to=' + encodeURIComponent(email.toEmail || '') +
+    '&su=' + encodeURIComponent(email.subject) +
+    '&body=' + encodeURIComponent(email.body);
+  window.open(url, '_blank');
+}
+
 </script>
 </body>
 </html>
