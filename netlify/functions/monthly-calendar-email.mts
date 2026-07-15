@@ -14,7 +14,11 @@ const TARGET_HOUR_ET = 7; // 7am Eastern, on the 1st of the month
 const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
 export default async () => {
-  if (!isCurrentEasternHour(TARGET_HOUR_ET) || easternDayOfMonth() !== 1) {
+  // FORCE_CALENDAR_SEND is a temporary manual-testing bypass — unset it (or set
+  // to anything other than "true") once testing is confirmed working, or every
+  // scheduled run will send a duplicate on top of the real 7am-on-the-1st send.
+  const forceSend = process.env.FORCE_CALENDAR_SEND === "true";
+  if (!forceSend && (!isCurrentEasternHour(TARGET_HOUR_ET) || easternDayOfMonth() !== 1)) {
     return new Response(JSON.stringify({ skipped: true, reason: "Not 7am Eastern on the 1st yet" }), { status: 200 });
   }
 

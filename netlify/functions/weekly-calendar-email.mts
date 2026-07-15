@@ -25,7 +25,11 @@ const fmt = (d: Date) => d.toISOString().slice(0, 10);
 export default async () => {
   // This function is scheduled to fire at two candidate UTC times to cover
   // both EST and EDT — only actually run on the one that's really 7am Eastern.
-  if (!isCurrentEasternHour(TARGET_HOUR_ET) || easternWeekday() !== 1) {
+  // FORCE_CALENDAR_SEND is a temporary manual-testing bypass — unset it (or set
+  // to anything other than "true") once testing is confirmed working, or every
+  // scheduled run will send a duplicate on top of the real 7am Monday send.
+  const forceSend = process.env.FORCE_CALENDAR_SEND === "true";
+  if (!forceSend && (!isCurrentEasternHour(TARGET_HOUR_ET) || easternWeekday() !== 1)) {
     return new Response(JSON.stringify({ skipped: true, reason: "Not 7am Eastern on Monday yet" }), { status: 200 });
   }
 
