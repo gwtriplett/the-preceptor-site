@@ -247,6 +247,22 @@
 
         <div class="row">
           <div class="field">
+            <label>Semester / Quarter <span class="opt">(optional)</span></label>
+            <select id="semesterQuarter">
+              <option value="">Select one…</option>
+              <option>2026 - Winter</option>
+              <option>2026 - Summer</option>
+              <option>2026 - Fall</option>
+              <option>2027 - Winter</option>
+              <option>2027 - Spring</option>
+              <option>2027 - Summer</option>
+              <option>2027 - Fall</option>
+            </select>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
             <label>Requested start date <span class="req">*</span></label>
             <input type="date" id="startDate" required />
             <div class="err">Start date is required.</div>
@@ -295,7 +311,15 @@
           <div class="field">
             <label>Resume link <span class="opt">(optional — Google Drive, Dropbox, etc.)</span></label>
             <input type="url" id="resumeLink" placeholder="https://" />
-            <div class="help">No link handy? Email your resume to us directly after submitting.</div>
+            <div class="help">No link handy? Upload the file directly below instead.</div>
+          </div>
+        </div>
+
+        <div class="row single">
+          <div class="field">
+            <label>Upload resume <span class="opt">(optional — PDF, Word doc, or image, up to 3MB)</span></label>
+            <input type="file" id="resumeFile" accept=".pdf,.doc,.docx,.png,.jpg,.jpeg" />
+            <div class="err" id="resumeFileErr" style="display:none;">That file is too large. Please keep it under 3MB, or use the link field above instead.</div>
           </div>
         </div>
 
@@ -383,6 +407,26 @@ document.getElementById('additionalPeriod').addEventListener('change', function(
   document.getElementById('additionalDates').style.display = this.checked ? 'grid' : 'none';
 });
 
+const MAX_RESUME_BYTES = 3 * 1024 * 1024; // 3MB
+document.getElementById('resumeFile').addEventListener('change', function(){
+  const errEl = document.getElementById('resumeFileErr');
+  if(this.files[0] && this.files[0].size > MAX_RESUME_BYTES){
+    errEl.style.display = 'block';
+    this.value = '';
+  } else {
+    errEl.style.display = 'none';
+  }
+});
+
+function fileToBase64(file){
+  return new Promise((resolve, reject)=>{
+    const reader = new FileReader();
+    reader.onload = () => resolve(reader.result.split(',')[1]);
+    reader.onerror = () => reject(new Error('Could not read the selected file.'));
+    reader.readAsDataURL(file);
+  });
+}
+
 function showStep(i){
   document.querySelectorAll('.fieldset').forEach(fs=>{
     fs.classList.toggle('active', Number(fs.dataset.fieldset) === i);
@@ -447,6 +491,7 @@ function buildReview(){
       <h3>Program &amp; Rotation</h3>
       <div class="review-line"><span class="k">University</span><span class="v">${v('university')}</span></div>
       <div class="review-line"><span class="k">Program</span><span class="v">${v('program') || '—'}</span></div>
+      <div class="review-line"><span class="k">Semester / Quarter</span><span class="v">${v('semesterQuarter') || '—'}</span></div>
       <div class="review-line"><span class="k">Hours required</span><span class="v">${v('hoursRequired') || '—'}</span></div>
       <div class="review-line"><span class="k">Dates</span><span class="v">${v('startDate') || '—'} to ${v('endDate') || '—'}</span></div>
       ${document.getElementById('additionalPeriod').checked ? `<div class="review-line"><span class="k">Additional period</span><span class="v">${v('addStartDate')||'—'} to ${v('addEndDate')||'—'}</span></div>` : ''}
@@ -454,6 +499,7 @@ function buildReview(){
     <div class="review-group">
       <h3>Documents</h3>
       <div class="review-line"><span class="k">Resume link</span><span class="v">${v('resumeLink') || 'Not provided'}</span></div>
+      <div class="review-line"><span class="k">Resume file</span><span class="v">${document.getElementById('resumeFile').files[0]?.name || 'Not provided'}</span></div>
       <div class="review-line"><span class="k">Handbook link</span><span class="v">${v('handbookLink') || 'Not provided'}</span></div>
     </div>
   `;
@@ -495,6 +541,7 @@ async function submitIntake(){
     university: document.getElementById('university').value.trim(),
     program: document.getElementById('program').value,
     yearSemester: document.getElementById('yearSemester').value.trim(),
+    semesterQuarter: document.getElementById('semesterQuarter').value,
     hoursRequired: document.getElementById('hoursRequired').value,
     startDate: document.getElementById('startDate').value,
     endDate: document.getElementById('endDate').value,
@@ -510,6 +557,15 @@ async function submitIntake(){
   };
 
   try{
+    const resumeFile = document.getElementById('resumeFile').files[0];
+    if(resumeFile){
+      payload.resumeFile = {
+        filename: resumeFile.name,
+        contentType: resumeFile.type || 'application/octet-stream',
+        base64: await fileToBase64(resumeFile)
+      };
+    }
+
     const resp = await fetch('/.netlify/functions/intake-submit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
@@ -527,6 +583,13 @@ async function submitIntake(){
     form.closest('.card').style.display = 'none';
     document.getElementById('confirmCard').style.display = 'block';
     document.getElementById('refId').textContent = `Student ID: ${data.studentId}`;
+    if(data.resumeUploadWarning){
+      const warn = document.createElement('p');
+      warn.style.color = '#b45309';
+      warn.style.marginTop = '12px';
+      warn.textContent = data.resumeUploadWarning;
+      document.getElementById('confirmCard').appendChild(warn);
+    }
 
   } catch(err){
     errBox.textContent = "We couldn't submit your form — " + err.message + ". Please try again, or contact your coordinator directly.";
