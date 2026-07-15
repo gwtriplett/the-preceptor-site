@@ -1,0 +1,12 @@
+{
+  "name": "the-preceptor-site",
+  "private": true,
+  "version": "1.0.0",
+  "dependencies": {
+    "nodemailer": "^6.9.14",
+    "pdfkit": "^0.15.0"
+  },
+  "devDependencies": {
+    "esbuild": "^0.28.1"
+  }
+}
