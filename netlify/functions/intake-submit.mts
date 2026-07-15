@@ -49,6 +49,7 @@ export default async (req: Request, context: Context) => {
     "University / College": (input.university || "").toString().trim(),
     "Degree / Program": (input.program || "").toString().trim(),
     "Current Year / Semester": (input.yearSemester || "").toString().trim(),
+    "Semester / Quarter": (input.semesterQuarter || "").toString().trim(),
     "Total Hours Required": Number(input.hoursRequired) || null,
     "Requested Start Date": startDate || null,
     "Requested End Date": (input.endDate || "").toString() || null,
@@ -92,7 +93,38 @@ export default async (req: Request, context: Context) => {
     if (!resp.ok) {
       return new Response(JSON.stringify({ error: data?.error?.message || "Airtable rejected the submission." }), { status: resp.status });
     }
-    return new Response(JSON.stringify({ ok: true, studentId }), {
+
+    const recordId = data?.records?.[0]?.id;
+
+    // Best-effort resume file upload — the student record is already saved at
+    // this point, so a problem here should never fail the whole submission.
+    let resumeUploadWarning: string | null = null;
+    if (recordId && input.resumeFile && input.resumeFile.base64) {
+      try {
+        const uploadResp = await fetch(
+          `https://content.airtable.com/v0/${STUDENTS_BASE_ID}/${recordId}/fldABGJevUP9LbewM/uploadAttachment`,
+          {
+            method: "POST",
+            headers: {
+              Authorization: `Bearer ${token}`,
+              "Content-Type": "application/json",
+            },
+            body: JSON.stringify({
+              contentType: input.resumeFile.contentType || "application/octet-stream",
+              file: input.resumeFile.base64,
+              filename: input.resumeFile.filename || "resume",
+            }),
+          }
+        );
+        if (!uploadResp.ok) {
+          resumeUploadWarning = "Your info was saved, but the resume file didn't upload. Please email it to your coordinator directly.";
+        }
+      } catch {
+        resumeUploadWarning = "Your info was saved, but the resume file didn't upload. Please email it to your coordinator directly.";
+      }
+    }
+
+    return new Response(JSON.stringify({ ok: true, studentId, resumeUploadWarning }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });
