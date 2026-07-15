@@ -87,10 +87,14 @@ export default async () => {
     }
   }
 
-  return new Response(
-    JSON.stringify({ ok: errors.length === 0, sessionCount: sessions.length, studentsEmailed, errors }),
-    { status: 200, headers: { "Content-Type": "application/json" } }
-  );
+  const result = { ok: errors.length === 0, sessionCount: sessions.length, studentsEmailed, errors };
+  if (errors.length) console.error("weekly-calendar-email errors:", errors);
+  console.log("weekly-calendar-email result:", JSON.stringify(result));
+
+  return new Response(JSON.stringify(result), {
+    status: 200,
+    headers: { "Content-Type": "application/json" },
+  });
 };
 
 export const config: Config = {
