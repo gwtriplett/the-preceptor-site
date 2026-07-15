@@ -25,8 +25,13 @@ export default async (req: Request, context: Context) => {
   const email = (input.email || "").toString().trim();
   const phone = (input.phone || "").toString().trim();
 
+  const semesterQuarter = (input.semesterQuarter || "").toString().trim();
+
   if (!firstName || !lastName || !email || !phone) {
     return new Response(JSON.stringify({ error: "First name, last name, email, and phone are required." }), { status: 400 });
+  }
+  if (!semesterQuarter) {
+    return new Response(JSON.stringify({ error: "Semester / Quarter is required." }), { status: 400 });
   }
 
   const startDate = (input.startDate || "").toString();
@@ -48,8 +53,7 @@ export default async (req: Request, context: Context) => {
     "Current Address": (input.address || "").toString().trim(),
     "University / College": (input.university || "").toString().trim(),
     "Degree / Program": (input.program || "").toString().trim(),
-    "Current Year / Semester": (input.yearSemester || "").toString().trim(),
-    "Semester / Quarter": (input.semesterQuarter || "").toString().trim(),
+    "Semester / Quarter": semesterQuarter,
     "Total Hours Required": Number(input.hoursRequired) || null,
     "Requested Start Date": startDate || null,
     "Requested End Date": (input.endDate || "").toString() || null,
