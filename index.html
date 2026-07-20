@@ -801,6 +801,7 @@
       <div class="portal-tab" onclick="setPortalTab('objectives', this)">My Objectives</div>
       <div class="portal-tab" onclick="setPortalTab('contact', this)">Update Info</div>
       <div class="portal-tab" onclick="setPortalTab('message', this)">Message Coordinator</div>
+      <div class="portal-tab" onclick="setPortalTab('availability', this)">My Availability</div>
     </div>
 
     <!-- TAB: SESSIONS -->
@@ -957,6 +958,34 @@
       </div>
     </div>
 
+    <!-- TAB: MY AVAILABILITY -->
+    <div id="ptab-availability" style="display:none">
+      <div class="card">
+        <div class="section-head" style="margin-bottom:14px">
+          <span class="section-title">Let us know when you're unavailable</span>
+        </div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+          Clinic hours are Mon–Thu 8am–5pm and Fri 10am–3pm. If you already know a date (or range of dates) you won't be able to come in, let your coordinator know here ahead of time.
+        </p>
+        <div class="update-field-row">
+          <div class="form-group" style="margin:0">
+            <label>First unavailable date</label>
+            <input type="date" id="unavail-start" />
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Last unavailable date (leave blank if just one day)</label>
+            <input type="date" id="unavail-end" />
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:10px">
+          <label>Reason (optional)</label>
+          <input type="text" id="unavail-reason" placeholder="e.g. school exams, personal, travel" />
+        </div>
+        <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="submitUnavailability()">Submit</button>
+        <div id="unavail-sent-msg" class="msg-sent">✓ Thanks — your coordinator has been notified.</div>
+      </div>
+    </div>
+
   </div><!-- /student-results -->
 
   <div id="student-empty" style="display:none">
@@ -1084,6 +1113,13 @@
       </div>
       <button class="btn btn-primary" onclick="saveBlackout()">Add blackout</button>
     </div>
+  </div>
+
+  <!-- STUDENT UNAVAILABILITY (submitted by students) -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="section-head"><span class="section-title">Student unavailability</span></div>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Dates students have told you ahead of time they can't come in. Submitted from their portal.</p>
+    <div id="unavail-list"></div>
   </div>
 
   <!-- RECURRING SESSIONS -->
@@ -1874,6 +1910,7 @@ async function loadStudentDirectory() {
     studentDirectory = all.map(rec => ({ id: rec.id, ...rec.fields }));
     populateStudentPicker('req');
     populateStudentPicker('recur');
+    loadStudentUnavailability();
   } catch (e) {
     console.error('Could not load student directory', e);
   }
@@ -2173,7 +2210,7 @@ async function lookupStudent() {
 function setPortalTab(tab, el) {
   document.querySelectorAll('.portal-tab').forEach(t => t.classList.remove('active'));
   if (el) el.classList.add('active');
-  ['sessions','docs','objectives','contact','message'].forEach(t => {
+  ['sessions','docs','objectives','contact','message','availability'].forEach(t => {
     const el = document.getElementById('ptab-' + t);
     if (el) el.style.display = t === tab ? 'block' : 'none';
   });
@@ -2247,6 +2284,74 @@ function renderDocStatuses() {
       el.innerHTML = `<span style="color:var(--text-muted);font-size:12px">— Not submitted</span>`;
     }
   });
+}
+
+// ── STUDENT AVAILABILITY ──────────────────────────────
+async function submitUnavailability() {
+  const start = document.getElementById('unavail-start').value;
+  const end = document.getElementById('unavail-end').value || start;
+  const reason = document.getElementById('unavail-reason').value.trim();
+  if (!start) { alert('Please pick at least a start date.'); return; }
+  try {
+    const resp = await fetch('/.netlify/functions/unavailability-submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ studentEmail: window._studentPortalEmail, startDate: start, endDate: end, reason })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || 'Could not submit.');
+    document.getElementById('unavail-start').value = '';
+    document.getElementById('unavail-end').value = '';
+    document.getElementById('unavail-reason').value = '';
+    const msg = document.getElementById('unavail-sent-msg');
+    msg.style.display = 'block';
+    setTimeout(() => msg.style.display = 'none', 4000);
+    const cfg = getEmailConfig();
+    if (hasValidCoordinatorEmail(cfg)) {
+      sendEmailViaClaudeAPI(cfg.fromEmail,
+        `Unavailable dates submitted — ${window._studentPortalName}`,
+        `${window._studentPortalName} let you know they're unavailable:
+
+${start}${end && end !== start ? ' through ' + end : ''}${reason ? '\nReason: ' + reason : ''}
+
+This is also saved in your Student Unavailability table in Airtable.`
+      );
+    }
+  } catch (e) {
+    alert('Could not submit: ' + e.message);
+  }
+}
+
+async function loadStudentUnavailability() {
+  try {
+    const data = await atRead(STUDENTS_BASE_ID, 'tblrbit6Z4MIyds8F', '?sort[0][field]=Unavailable%20Start%20Date&sort[0][direction]=asc');
+    if (!data) throw new Error('Could not reach the server.');
+    renderStudentUnavailability(data.records || []);
+  } catch (e) {
+    console.error('Could not load student unavailability', e);
+  }
+}
+
+function renderStudentUnavailability(records) {
+  const list = document.getElementById('unavail-list');
+  if (!list) return;
+  if (records.length === 0) {
+    list.innerHTML = '<p style="font-size:13px;color:var(--text-muted)">No students have submitted unavailable dates yet.</p>';
+    return;
+  }
+  list.innerHTML = records.map(r => {
+    const f = r.fields;
+    const studentId = (f['Student'] || [])[0];
+    const student = studentDirectory.find(s => s.id === studentId);
+    const name = student ? (student['Student Name'] || 'Unknown student') : 'Unknown student';
+    const start = f['Unavailable Start Date'] || '—';
+    const end = f['Unavailable End Date'] || start;
+    const range = start === end ? formatDate(start) : `${formatDate(start)} – ${formatDate(end)}`;
+    const reason = f['Reason'] ? ` — ${f['Reason']}` : '';
+    return `<div style="display:flex;justify-content:space-between;align-items:center;padding:8px 0;border-bottom:1px solid var(--gray-100)">
+      <div><strong>${name}</strong><span style="color:var(--text-muted);font-size:13px"> · ${range}${reason}</span></div>
+    </div>`;
+  }).join('');
 }
 
 // ── CONTACT INFO UPDATE ───────────────────────────────
