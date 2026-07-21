@@ -14,6 +14,9 @@ const TARGET_HOUR_ET = 7; // 7am Eastern, on the 1st of the month
 const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
 export default async () => {
+  // DISABLED — remove this line to turn the monthly calendar send back on.
+  return new Response(JSON.stringify({ skipped: true, reason: "Monthly calendar send is disabled" }), { status: 200 });
+
   // FORCE_CALENDAR_SEND is a temporary manual-testing bypass — unset it (or set
   // to anything other than "true") once testing is confirmed working, or every
   // scheduled run will send a duplicate on top of the real 7am-on-the-1st send.

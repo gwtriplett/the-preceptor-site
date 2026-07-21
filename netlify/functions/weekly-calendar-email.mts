@@ -23,6 +23,9 @@ function mondayOfCurrentWeek(): Date {
 const fmt = (d: Date) => d.toISOString().slice(0, 10);
 
 export default async () => {
+  // DISABLED — remove this line to turn the weekly calendar send back on.
+  return new Response(JSON.stringify({ skipped: true, reason: "Weekly calendar send is disabled" }), { status: 200 });
+
   // This function is scheduled to fire at two candidate UTC times to cover
   // both EST and EDT — only actually run on the one that's really 7am Eastern.
   // FORCE_CALENDAR_SEND is a temporary manual-testing bypass — unset it (or set

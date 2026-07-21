@@ -2183,7 +2183,7 @@ async function lookupStudent() {
     const cancelBtn = (status === 'Approved' || status === 'Pending')
       ? `<button class="cancel-session-btn" onclick="requestCancelSession('${s.id}','${formatDate(s['Session Date'])}','${(s['Clinical Focus']||'').replace(/'/g,"\'")}')">Request cancellation</button>`
       : '';
-    const checklist = status === 'Approved' ? renderStudentChecklist(s.id) : '';
+    const checklist = ''; // Pre-session checklist disabled for now
     return `<div class="session-card">
       <div class="session-date-col">
         <div class="session-month">${month}</div>
