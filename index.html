@@ -1196,6 +1196,31 @@
     </div>
   </div>
 
+  <!-- STUDENT PORTAL ACCESS -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="section-head">
+      <span class="section-title">Student portal access</span>
+      <button class="btn btn-primary btn-sm" id="portal-access-send-btn" style="display:none" onclick="sendPortalAccessEmails()">✉ Send Selected (<span id="portal-access-count">0</span>)</button>
+    </div>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Email students the scheduler link and how to log in — no password needed, just their email address or Student ID.</p>
+    <div class="tbl-wrap">
+      <table id="portal-access-table" style="width:100%">
+        <thead>
+          <tr>
+            <th style="width:28px"><input type="checkbox" id="select-all-portal" onchange="toggleSelectAllPortal(this.checked)" title="Select all"></th>
+            <th>Student</th>
+            <th>Email</th>
+            <th>Student ID</th>
+            <th>University</th>
+          </tr>
+        </thead>
+        <tbody id="portal-access-tbody">
+          <tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted)">No students loaded yet.</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
   <!-- COMPLETION CERTIFICATE -->
   <div class="card">
     <div class="section-head"><span class="section-title">Completion certificate generator</span></div>
@@ -2949,6 +2974,91 @@ async function renderRevenuePage() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// STUDENT PORTAL ACCESS
+// ══════════════════════════════════════════════════════════════
+const PORTAL_URL = 'https://sked.thepreceptorsite.com';
+let selectedPortalIds = new Set();
+
+function renderPortalAccessList() {
+  const tbody = document.getElementById('portal-access-tbody');
+  if (!tbody) return;
+  if (!studentDirectory.length) {
+    tbody.innerHTML = `<tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted)">No students loaded yet.</td></tr>`;
+    updatePortalAccessUI();
+    return;
+  }
+  tbody.innerHTML = studentDirectory.map(s => `<tr>
+    <td><input type="checkbox" class="portal-select-cb" data-id="${s.id}" onchange="toggleSelectPortal('${s.id}', this.checked)" ${selectedPortalIds.has(s.id) ? 'checked' : ''}></td>
+    <td>${s['Student Name'] || '—'}</td>
+    <td style="font-size:12px">${s['Email'] || '—'}</td>
+    <td style="font-size:12px">${s['Student ID'] || '—'}</td>
+    <td style="font-size:12px;color:var(--text-muted)">${s['University / College'] || '—'}</td>
+  </tr>`).join('');
+  updatePortalAccessUI();
+}
+
+function toggleSelectPortal(id, checked) {
+  if (checked) selectedPortalIds.add(id); else selectedPortalIds.delete(id);
+  updatePortalAccessUI();
+}
+
+function toggleSelectAllPortal(checked) {
+  document.querySelectorAll('.portal-select-cb').forEach(cb => {
+    cb.checked = checked;
+    if (checked) selectedPortalIds.add(cb.dataset.id); else selectedPortalIds.delete(cb.dataset.id);
+  });
+  updatePortalAccessUI();
+}
+
+function updatePortalAccessUI() {
+  Array.from(selectedPortalIds).forEach(id => { if (!studentDirectory.some(s => s.id === id)) selectedPortalIds.delete(id); });
+  const btn = document.getElementById('portal-access-send-btn');
+  const countEl = document.getElementById('portal-access-count');
+  const selectAllCb = document.getElementById('select-all-portal');
+  if (countEl) countEl.textContent = selectedPortalIds.size;
+  if (btn) btn.style.display = selectedPortalIds.size > 0 ? 'inline-flex' : 'none';
+  if (selectAllCb) {
+    const visibleIds = Array.from(document.querySelectorAll('.portal-select-cb')).map(cb => cb.dataset.id);
+    selectAllCb.checked = visibleIds.length > 0 && visibleIds.every(id => selectedPortalIds.has(id));
+  }
+}
+
+async function sendPortalAccessEmails() {
+  const students = Array.from(selectedPortalIds)
+    .map(id => studentDirectory.find(s => s.id === id))
+    .filter(s => s && s['Email']);
+  if (students.length === 0) { alert('No students with an email address are selected.'); return; }
+
+  const missingEmail = Array.from(selectedPortalIds).length - students.length;
+  const confirmMsg = `Send portal access emails to ${students.length} student${students.length !== 1 ? 's' : ''}?` +
+    (missingEmail > 0 ? `\n(${missingEmail} selected student${missingEmail !== 1 ? 's have' : ' has'} no email on file and will be skipped.)` : '');
+  if (!confirm(confirmMsg)) return;
+
+  try {
+    const resp = await fetch('/.netlify/functions/send-portal-access-emails', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        staffPassword: staffPasswordEntered,
+        students: students.map(s => ({ name: s['Student Name'] || 'Student', email: s['Email'], studentId: s['Student ID'] || '' }))
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
+    selectedPortalIds.clear();
+    renderPortalAccessList();
+    if (data.failed && data.failed.length > 0) {
+      alert(`Sent ${data.sent} email${data.sent !== 1 ? 's' : ''}. ${data.failed.length} failed:\n` + data.failed.map(f => `${f.email || '(missing email)'}: ${f.error}`).join('\n'));
+    } else {
+      alert(`Sent ${data.sent} portal access email${data.sent !== 1 ? 's' : ''}.`);
+    }
+  } catch (e) {
+    console.error(e);
+    alert('Could not send emails: ' + e.message);
+  }
+}
+
+// ══════════════════════════════════════════════════════════════
 // FEATURE 6: COMPLETION CERTIFICATE
 // ══════════════════════════════════════════════════════════════
 function populateCertStudentSelect() {
@@ -3097,7 +3207,7 @@ const _origSwitchMode = switchMode;
 switchMode = function(mode) {
   _origSwitchMode.apply(this, arguments);
   if (mode === 'revenue') renderRevenuePage();
-  if (mode === 'planning') { renderBlackoutList(); populateCertStudentSelect(); document.getElementById('capacity-limit').value = getCapacityLimit(); }
+  if (mode === 'planning') { renderBlackoutList(); populateCertStudentSelect(); renderPortalAccessList(); document.getElementById('capacity-limit').value = getCapacityLimit(); }
 };
 
 // ══════════════════════════════════════════════════════════════
