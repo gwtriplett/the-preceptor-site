@@ -708,6 +708,9 @@
     <button class="btn btn-sm" onclick="loadSessions()">↻ Refresh</button>
     <button class="btn btn-primary btn-sm" onclick="openModal('request-modal')">+ Add Session</button>
     <button class="btn btn-success btn-sm" id="batch-approve-btn" style="display:none" onclick="batchApproveSessions()">✓ Approve Selected (<span id="batch-approve-count">0</span>)</button>
+    <button class="btn btn-teal btn-sm" id="batch-complete-btn" style="display:none" onclick="batchMarkCompletedSessions()">Mark Completed (<span id="batch-complete-count">0</span>)</button>
+    <button class="btn btn-primary btn-sm" id="batch-signoff-btn" style="display:none" onclick="batchSignOffSessions()">🖊 Sign Off Selected (<span id="batch-signoff-count">0</span>)</button>
+    <span id="batch-mixed-warning" style="display:none;font-size:12px;color:var(--text-muted)">Select sessions with the same status to batch process.</span>
     <span class="filter-count" id="filter-count"></span>
   </div>
 
@@ -716,7 +719,7 @@
       <table id="sessions-table">
         <thead>
           <tr>
-            <th style="width:28px"><input type="checkbox" id="select-all-pending" onchange="toggleSelectAllPending(this.checked)" title="Select all pending"></th>
+            <th style="width:28px"><input type="checkbox" id="select-all-pending" onchange="toggleSelectAllVisible(this.checked)" title="Select all"></th>
             <th>Student</th>
             <th>Date</th>
             <th>Time</th>
@@ -1481,7 +1484,7 @@ async function atWrite(base, table, method, path, body) {
 }
 let currentTab = 'pending';
 let signoffRecord = null;
-let selectedPendingIds = new Set();
+let selectedSessionIds = new Set();
 
 // ── SETTINGS ──────────────────────────────────────────
 function openSettings() {
@@ -1615,6 +1618,7 @@ function setTab(tab, el) {
   document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
   el.classList.add('active');
   currentTab = tab;
+  selectedSessionIds.clear();
   renderTable();
 }
 
@@ -1682,7 +1686,7 @@ function renderTable() {
   const tbody = document.getElementById('sessions-tbody');
   if (sessions.length === 0) {
     tbody.innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-title">No sessions in this view</div><p style="font-size:13px;margin-top:4px">Try a different tab or adjust your filters.</p></div></td></tr>`;
-    updateBatchApproveUI([]);
+    updateBatchActionUI([]);
     return;
   }
 
@@ -1708,8 +1712,9 @@ function renderTable() {
     }
     actions += `<div><button class="btn btn-sm" style="margin-top:4px;padding:2px 8px;font-size:11px;" onclick="openEditHours('${s.id}')">✎ Edit hours</button></div>`;
 
-    const selectCell = status === 'Pending'
-      ? `<input type="checkbox" class="session-select-cb" data-id="${s.id}" onchange="toggleSessionSelect('${s.id}', this.checked)" ${selectedPendingIds.has(s.id) ? 'checked' : ''}>`
+    const isActionable = status === 'Pending' || status === 'Approved' || needsSignoff;
+    const selectCell = isActionable
+      ? `<input type="checkbox" class="session-select-cb" data-id="${s.id}" onchange="toggleSessionSelect('${s.id}', this.checked)" ${selectedSessionIds.has(s.id) ? 'checked' : ''}>`
       : '';
 
     return `<tr class="${needsSignoff ? 'signoff-row' : ''}">
@@ -1730,42 +1735,83 @@ function renderTable() {
     </tr>`;
   }).join('');
 
-  const visiblePendingIds = sessions.filter(s => (s['Approval Status'] || 'Pending') === 'Pending').map(s => s.id);
+  const visibleActionableIds = sessions.filter(s => {
+    const st = s['Approval Status'] || 'Pending';
+    const ns = st === 'Completed' && !s['Signed Off By'];
+    return st === 'Pending' || st === 'Approved' || ns;
+  }).map(s => s.id);
   // Selections for sessions no longer visible (filtered out) stay selected but don't drive the header checkbox.
-  updateBatchApproveUI(visiblePendingIds);
+  updateBatchActionUI(visibleActionableIds);
 }
 
-// ── BATCH APPROVAL ─────────────────────────────────────
+// ── BATCH ACTIONS (Approve / Mark Completed / Sign Off) ─
+function sessionActionType(s) {
+  const st = s['Approval Status'] || 'Pending';
+  if (st === 'Pending') return 'approve';
+  if (st === 'Approved') return 'complete';
+  if (st === 'Completed' && !s['Signed Off By']) return 'signoff';
+  return 'none';
+}
+
 function toggleSessionSelect(id, checked) {
-  if (checked) selectedPendingIds.add(id); else selectedPendingIds.delete(id);
-  const visiblePendingIds = Array.from(document.querySelectorAll('.session-select-cb')).map(cb => cb.dataset.id);
-  updateBatchApproveUI(visiblePendingIds);
+  if (checked) selectedSessionIds.add(id); else selectedSessionIds.delete(id);
+  const visibleActionableIds = Array.from(document.querySelectorAll('.session-select-cb')).map(cb => cb.dataset.id);
+  updateBatchActionUI(visibleActionableIds);
 }
 
-function toggleSelectAllPending(checked) {
+function toggleSelectAllVisible(checked) {
   document.querySelectorAll('.session-select-cb').forEach(cb => {
     cb.checked = checked;
-    if (checked) selectedPendingIds.add(cb.dataset.id); else selectedPendingIds.delete(cb.dataset.id);
+    if (checked) selectedSessionIds.add(cb.dataset.id); else selectedSessionIds.delete(cb.dataset.id);
   });
-  const visiblePendingIds = Array.from(document.querySelectorAll('.session-select-cb')).map(cb => cb.dataset.id);
-  updateBatchApproveUI(visiblePendingIds);
+  const visibleActionableIds = Array.from(document.querySelectorAll('.session-select-cb')).map(cb => cb.dataset.id);
+  updateBatchActionUI(visibleActionableIds);
 }
 
-function updateBatchApproveUI(visiblePendingIds) {
-  const btn = document.getElementById('batch-approve-btn');
-  const countEl = document.getElementById('batch-approve-count');
+function updateBatchActionUI(visibleActionableIds) {
+  // Drop selections for sessions that no longer exist (e.g. after a reload).
+  Array.from(selectedSessionIds).forEach(id => { if (!allSessions.some(s => s.id === id)) selectedSessionIds.delete(id); });
+
+  const approveBtn = document.getElementById('batch-approve-btn');
+  const completeBtn = document.getElementById('batch-complete-btn');
+  const signoffBtn = document.getElementById('batch-signoff-btn');
+  const warning = document.getElementById('batch-mixed-warning');
   const selectAllCb = document.getElementById('select-all-pending');
-  if (countEl) countEl.textContent = selectedPendingIds.size;
-  if (btn) btn.style.display = selectedPendingIds.size > 0 ? 'inline-flex' : 'none';
+
+  approveBtn.style.display = 'none';
+  completeBtn.style.display = 'none';
+  signoffBtn.style.display = 'none';
+  warning.style.display = 'none';
+
+  const selectedSessions = Array.from(selectedSessionIds).map(id => allSessions.find(s => s.id === id)).filter(Boolean);
+  if (selectedSessions.length > 0) {
+    const types = new Set(selectedSessions.map(sessionActionType));
+    if (types.size === 1 && !types.has('none')) {
+      const type = [...types][0];
+      if (type === 'approve') {
+        approveBtn.style.display = 'inline-flex';
+        document.getElementById('batch-approve-count').textContent = selectedSessions.length;
+      } else if (type === 'complete') {
+        completeBtn.style.display = 'inline-flex';
+        document.getElementById('batch-complete-count').textContent = selectedSessions.length;
+      } else if (type === 'signoff') {
+        signoffBtn.style.display = 'inline-flex';
+        document.getElementById('batch-signoff-count').textContent = selectedSessions.length;
+      }
+    } else {
+      warning.style.display = 'inline';
+    }
+  }
+
   if (selectAllCb) {
-    selectAllCb.checked = visiblePendingIds.length > 0 && visiblePendingIds.every(id => selectedPendingIds.has(id));
+    selectAllCb.checked = visibleActionableIds.length > 0 && visibleActionableIds.every(id => selectedSessionIds.has(id));
   }
 }
 
 async function batchApproveSessions() {
-  const ids = Array.from(selectedPendingIds).filter(id => {
+  const ids = Array.from(selectedSessionIds).filter(id => {
     const s = allSessions.find(x => x.id === id);
-    return s && (s['Approval Status'] || 'Pending') === 'Pending';
+    return s && sessionActionType(s) === 'approve';
   });
   if (ids.length === 0) { alert('No pending sessions selected.'); return; }
 
@@ -1785,7 +1831,7 @@ async function batchApproveSessions() {
     }
   }
 
-  selectedPendingIds.clear();
+  selectedSessionIds.clear();
   await loadSessions();
 
   const cfg = getEmailConfig();
@@ -1800,6 +1846,56 @@ async function batchApproveSessions() {
       );
     }
   }
+}
+
+async function batchMarkCompletedSessions() {
+  const ids = Array.from(selectedSessionIds).filter(id => {
+    const s = allSessions.find(x => x.id === id);
+    return s && sessionActionType(s) === 'complete';
+  });
+  if (ids.length === 0) { alert('No approved sessions selected.'); return; }
+  if (!confirm(`Mark ${ids.length} session${ids.length !== 1 ? 's' : ''} as completed?`)) return;
+
+  for (let i = 0; i < ids.length; i += 10) {
+    const chunk = ids.slice(i, i + 10);
+    const records = chunk.map(id => ({ id, fields: { 'Approval Status': 'Completed' } }));
+    const res = await airtableRequest('PATCH', '', { records });
+    if (!res) {
+      alert('Batch update stopped due to an error partway through. Please check which sessions were updated and retry the rest.');
+      break;
+    }
+  }
+
+  selectedSessionIds.clear();
+  await loadSessions();
+}
+
+async function batchSignOffSessions() {
+  const ids = Array.from(selectedSessionIds).filter(id => {
+    const s = allSessions.find(x => x.id === id);
+    return s && sessionActionType(s) === 'signoff';
+  });
+  if (ids.length === 0) { alert('No sessions awaiting sign-off are selected.'); return; }
+
+  const name = prompt(`Signing off ${ids.length} session${ids.length !== 1 ? 's' : ''}.\nEach session will be signed off for its full scheduled hours (edit individually afterward if any need adjusting).\nEnter your name (Preceptor):`);
+  if (!name) return;
+
+  const today = new Date().toISOString().split('T')[0];
+  for (let i = 0; i < ids.length; i += 10) {
+    const chunk = ids.slice(i, i + 10);
+    const records = chunk.map(id => {
+      const s = allSessions.find(x => x.id === id);
+      return { id, fields: { 'Hours Signed Off': s['Hours This Session'] || 0, 'Signed Off By': name, 'Sign Off Date': today, 'Approval Status': 'Completed' } };
+    });
+    const res = await airtableRequest('PATCH', '', { records });
+    if (!res) {
+      alert('Batch sign-off stopped due to an error partway through. Please check which sessions were updated and retry the rest.');
+      break;
+    }
+  }
+
+  selectedSessionIds.clear();
+  await loadSessions();
 }
 
 // ── APPROVE / DENY / COMPLETE ─────────────────────────
