@@ -707,6 +707,7 @@
     </select>
     <button class="btn btn-sm" onclick="loadSessions()">↻ Refresh</button>
     <button class="btn btn-primary btn-sm" onclick="openModal('request-modal')">+ Add Session</button>
+    <button class="btn btn-success btn-sm" id="batch-approve-btn" style="display:none" onclick="batchApproveSessions()">✓ Approve Selected (<span id="batch-approve-count">0</span>)</button>
     <span class="filter-count" id="filter-count"></span>
   </div>
 
@@ -715,6 +716,7 @@
       <table id="sessions-table">
         <thead>
           <tr>
+            <th style="width:28px"><input type="checkbox" id="select-all-pending" onchange="toggleSelectAllPending(this.checked)" title="Select all pending"></th>
             <th>Student</th>
             <th>Date</th>
             <th>Time</th>
@@ -726,7 +728,7 @@
           </tr>
         </thead>
         <tbody id="sessions-tbody">
-          <tr><td colspan="8" style="text-align:center;padding:30px;color:var(--text-muted)">Loading sessions...</td></tr>
+          <tr><td colspan="9" style="text-align:center;padding:30px;color:var(--text-muted)">Loading sessions...</td></tr>
         </tbody>
       </table>
     </div>
@@ -1479,6 +1481,7 @@ async function atWrite(base, table, method, path, body) {
 }
 let currentTab = 'pending';
 let signoffRecord = null;
+let selectedPendingIds = new Set();
 
 // ── SETTINGS ──────────────────────────────────────────
 function openSettings() {
@@ -1631,7 +1634,7 @@ async function airtableRequest(method, path, body) {
 
 function showNoToken() {
   const tbody = document.getElementById('sessions-tbody');
-  if(tbody) tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:40px;color:var(--text-muted)">
+  if(tbody) tbody.innerHTML = `<tr><td colspan="9" style="text-align:center;padding:40px;color:var(--text-muted)">
     <div style="font-size:15px;font-weight:600;margin-bottom:6px;color:var(--text)">Couldn't load session data</div>
     <div style="margin-bottom:14px;font-size:13px">The server couldn't reach Airtable. Check that AIRTABLE_TOKEN is set correctly in Netlify's Environment Variables.</div>
     <button class="btn btn-primary" onclick="loadSessions()">Try again</button>
@@ -1678,7 +1681,8 @@ function renderTable() {
 
   const tbody = document.getElementById('sessions-tbody');
   if (sessions.length === 0) {
-    tbody.innerHTML = `<tr><td colspan="8"><div class="empty"><div class="empty-title">No sessions in this view</div><p style="font-size:13px;margin-top:4px">Try a different tab or adjust your filters.</p></div></td></tr>`;
+    tbody.innerHTML = `<tr><td colspan="9"><div class="empty"><div class="empty-title">No sessions in this view</div><p style="font-size:13px;margin-top:4px">Try a different tab or adjust your filters.</p></div></td></tr>`;
+    updateBatchApproveUI([]);
     return;
   }
 
@@ -1704,7 +1708,12 @@ function renderTable() {
     }
     actions += `<div><button class="btn btn-sm" style="margin-top:4px;padding:2px 8px;font-size:11px;" onclick="openEditHours('${s.id}')">✎ Edit hours</button></div>`;
 
+    const selectCell = status === 'Pending'
+      ? `<input type="checkbox" class="session-select-cb" data-id="${s.id}" onchange="toggleSessionSelect('${s.id}', this.checked)" ${selectedPendingIds.has(s.id) ? 'checked' : ''}>`
+      : '';
+
     return `<tr class="${needsSignoff ? 'signoff-row' : ''}">
+      <td>${selectCell}</td>
       <td><div style="font-weight:600">${s['Student Name'] || '—'}</div><div style="font-size:11px;color:var(--text-muted)">${s['University'] || ''}</div></td>
       <td>${formatDate(s['Session Date'])}</td>
       <td style="white-space:nowrap;font-size:12px">${s['Start Time'] || '—'} – ${s['End Time'] || '—'}</td>
@@ -1720,6 +1729,77 @@ function renderTable() {
       <td>${actions}</td>
     </tr>`;
   }).join('');
+
+  const visiblePendingIds = sessions.filter(s => (s['Approval Status'] || 'Pending') === 'Pending').map(s => s.id);
+  // Selections for sessions no longer visible (filtered out) stay selected but don't drive the header checkbox.
+  updateBatchApproveUI(visiblePendingIds);
+}
+
+// ── BATCH APPROVAL ─────────────────────────────────────
+function toggleSessionSelect(id, checked) {
+  if (checked) selectedPendingIds.add(id); else selectedPendingIds.delete(id);
+  const visiblePendingIds = Array.from(document.querySelectorAll('.session-select-cb')).map(cb => cb.dataset.id);
+  updateBatchApproveUI(visiblePendingIds);
+}
+
+function toggleSelectAllPending(checked) {
+  document.querySelectorAll('.session-select-cb').forEach(cb => {
+    cb.checked = checked;
+    if (checked) selectedPendingIds.add(cb.dataset.id); else selectedPendingIds.delete(cb.dataset.id);
+  });
+  const visiblePendingIds = Array.from(document.querySelectorAll('.session-select-cb')).map(cb => cb.dataset.id);
+  updateBatchApproveUI(visiblePendingIds);
+}
+
+function updateBatchApproveUI(visiblePendingIds) {
+  const btn = document.getElementById('batch-approve-btn');
+  const countEl = document.getElementById('batch-approve-count');
+  const selectAllCb = document.getElementById('select-all-pending');
+  if (countEl) countEl.textContent = selectedPendingIds.size;
+  if (btn) btn.style.display = selectedPendingIds.size > 0 ? 'inline-flex' : 'none';
+  if (selectAllCb) {
+    selectAllCb.checked = visiblePendingIds.length > 0 && visiblePendingIds.every(id => selectedPendingIds.has(id));
+  }
+}
+
+async function batchApproveSessions() {
+  const ids = Array.from(selectedPendingIds).filter(id => {
+    const s = allSessions.find(x => x.id === id);
+    return s && (s['Approval Status'] || 'Pending') === 'Pending';
+  });
+  if (ids.length === 0) { alert('No pending sessions selected.'); return; }
+
+  const name = prompt(`Approving ${ids.length} session${ids.length !== 1 ? 's' : ''}.\nEnter your name (Preceptor/Coordinator):`);
+  if (!name) return;
+
+  const today = new Date().toISOString().split('T')[0];
+  const sessionsToApprove = ids.map(id => allSessions.find(s => s.id === id)).filter(Boolean);
+
+  for (let i = 0; i < ids.length; i += 10) {
+    const chunk = ids.slice(i, i + 10);
+    const records = chunk.map(id => ({ id, fields: { 'Approval Status': 'Approved', 'Approved By': name, 'Approved Date': today } }));
+    const res = await airtableRequest('PATCH', '', { records });
+    if (!res) {
+      alert('Batch approval stopped due to an error partway through. Please check which sessions were approved and retry the rest.');
+      break;
+    }
+  }
+
+  selectedPendingIds.clear();
+  await loadSessions();
+
+  const cfg = getEmailConfig();
+  if (cfg.notifyApproved) {
+    for (const session of sessionsToApprove) {
+      if (!session['Student Email']) continue;
+      const dateStr = formatDate(session['Session Date']);
+      await sendEmailViaClaudeAPI(
+        session['Student Email'],
+        `Your clinical session on ${dateStr} is approved — The Preceptor Site`,
+        `Dear ${session['Student Name']},\n\nGreat news! Your clinical session request has been reviewed and approved.\n\nSession Details:\n- Date: ${dateStr}\n- Time: ${session['Start Time'] || '—'} to ${session['End Time'] || '—'}\n- Hours: ${session['Hours This Session'] || '—'}\n- Clinical Focus: ${session['Clinical Focus'] || '—'}\n\nYou are cleared to arrive at the clinic on ${dateStr}.\n\nPlease remember to:\n- Wear your photo ID badge\n- Arrive on time\n- Review your clinical objectives beforehand\n\nApproved by: ${name}\nLocation: 3520 High Street, Suite 100, Portsmouth, VA 23707`
+      );
+    }
+  }
 }
 
 // ── APPROVE / DENY / COMPLETE ─────────────────────────
