@@ -560,13 +560,14 @@
       <button class="modal-close" onclick="closeModal('request-modal')">✕</button>
     </div>
 
-    <div class="form-group" style="margin-bottom:16px;">
+    <div class="form-group" id="req-student-picker-group" style="margin-bottom:16px;">
       <label>Student</label>
       <select id="req-student-picker" onchange="onStudentPicked('req')" style="width:100%;padding:8px 10px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:13px;">
         <option value="">+ New / Manual Entry…</option>
       </select>
       <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">Pick an existing student to auto-fill their info below, or leave on Manual Entry for someone new.</div>
     </div>
+    <div id="req-student-locked-note" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:12px;margin-top:-8px;">Your info below is pre-filled from your student profile. Need something corrected? Use "Update Info" or message your coordinator.</div>
 
     <div class="form-grid" style="margin-bottom:10px">
       <div class="form-group">
@@ -706,7 +707,7 @@
       <option value="No Show">No Show</option>
     </select>
     <button class="btn btn-sm" onclick="loadSessions()">↻ Refresh</button>
-    <button class="btn btn-primary btn-sm" onclick="openModal('request-modal')">+ Add Session</button>
+    <button class="btn btn-primary btn-sm" onclick="openStaffRequestModal()">+ Add Session</button>
     <button class="btn btn-success btn-sm" id="batch-approve-btn" style="display:none" onclick="batchApproveSessions()">✓ Approve Selected (<span id="batch-approve-count">0</span>)</button>
     <button class="btn btn-teal btn-sm" id="batch-complete-btn" style="display:none" onclick="batchMarkCompletedSessions()">Mark Completed (<span id="batch-complete-count">0</span>)</button>
     <button class="btn btn-primary btn-sm" id="batch-signoff-btn" style="display:none" onclick="batchSignOffSessions()">🖊 Sign Off Selected (<span id="batch-signoff-count">0</span>)</button>
@@ -813,7 +814,7 @@
     <div id="ptab-sessions">
       <div class="section-head" style="margin-bottom:14px">
         <span class="section-title">Your sessions</span>
-        <button class="btn btn-primary btn-sm" onclick="openModal('request-modal')">+ Request a session</button>
+        <button class="btn btn-primary btn-sm" onclick="openStudentRequestModal()">+ Request a session</button>
       </div>
       <div id="student-sessions-list"></div>
     </div>
@@ -1090,12 +1091,12 @@
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Set the maximum number of students allowed in the clinic on any single day. Students cannot request dates that are already at capacity.</p>
     <div style="display:flex;align-items:center;gap:14px">
       <label style="font-size:13px;font-weight:500">Max students per day:</label>
-      <input type="number" id="capacity-limit" min="1" max="20" value="3" style="width:80px" />
+      <input type="number" id="capacity-limit" min="1" max="20" value="4" style="width:80px" />
       <button class="btn btn-primary btn-sm" onclick="saveCapacity()">Save</button>
       <span id="capacity-saved" style="font-size:12px;color:var(--green);display:none">✓ Saved</span>
     </div>
     <div style="margin-top:14px;padding:12px 16px;background:var(--gray-50);border-radius:8px;font-size:12px;color:var(--text-muted)">
-      Current setting: <strong id="capacity-display">3 students/day</strong>. Days at capacity will show as unavailable to students and shaded red on the calendar.
+      Current setting: <strong id="capacity-display">4 students/day</strong>. Days at capacity will show as unavailable to students and shaded red on the calendar.
     </div>
   </div>
 
@@ -1284,6 +1285,7 @@
         <span><span class="legend-dot" style="background:#2563EB"></span>Completed</span>
         <span><span class="legend-dot" style="background:#DC2626"></span>Denied</span>
       </div>
+      <button class="btn btn-primary btn-sm" onclick="openCalendarRequestModal()">+ Request a session</button>
       <button class="btn btn-sm" onclick="printCalendar()">&#128438; Print</button>
     </div>
   </div>
@@ -1510,6 +1512,7 @@ async function atWrite(base, table, method, path, body) {
 let currentTab = 'pending';
 let signoffRecord = null;
 let selectedSessionIds = new Set();
+let capacityOverride = null;
 
 // ── SETTINGS ──────────────────────────────────────────
 function openSettings() {
@@ -2209,9 +2212,11 @@ async function submitRequest() {
   const validRows = rows.filter(r => r.date && r.start && r.end);
   if (validRows.length === 0) { alert('Please fill in at least one date, arrival time, and departure time.'); return; }
 
+  const override = capacityOverride;
+  const today = new Date().toISOString().split('T')[0];
   const records = validRows.map(r => {
     const hrs = parseFloat(r.hours) || calcHours(r.start, r.end);
-    return { fields: {
+    const fields = {
       'Session Name': `${name} — ${formatDate(r.date)}`,
       'Student Name': name, 'Student Email': email,
       'University': uni,
@@ -2220,8 +2225,13 @@ async function submitRequest() {
       'Clinical Focus': r.focus,
       'Student Notes': r.notes,
       'Total Hours Required': total,
-      'Approval Status': 'Pending'
-    }};
+      'Approval Status': override ? 'Approved' : 'Pending'
+    };
+    if (override) {
+      fields['Approved By'] = override.name;
+      fields['Approved Date'] = today;
+    }
+    return { fields };
   });
 
   let created = 0;
@@ -2230,6 +2240,7 @@ async function submitRequest() {
     const res = await airtableRequest('POST', '', { records: batch });
     if (res) created += batch.length;
   }
+  capacityOverride = null;
 
   if (created > 0) {
     closeModal('request-modal');
@@ -2240,7 +2251,18 @@ async function submitRequest() {
       'ok'
     );
     const cfg = getEmailConfig();
-    if (cfg.notifyNewRequest && cfg.fromEmail) {
+    if (override) {
+      if (cfg.notifyApproved && email) {
+        for (const r of validRows) {
+          const dateStr = formatDate(r.date);
+          await sendEmailViaClaudeAPI(
+            email,
+            `Your clinical session on ${dateStr} is approved — The Preceptor Site`,
+            `Dear ${name},\n\nYour clinical session has been added and approved.\n\nSession Details:\n- Date: ${dateStr}\n- Time: ${r.start || '—'} to ${r.end || '—'}\n- Hours: ${r.hours || calcHours(r.start, r.end)}\n- Clinical Focus: ${r.focus || '—'}\n\nYou are cleared to arrive at the clinic on ${dateStr}.\n\nApproved by: ${override.name}\nLocation: 3520 High Street, Suite 100, Portsmouth, VA 23707`
+          );
+        }
+      }
+    } else if (cfg.notifyNewRequest && cfg.fromEmail) {
       const dateList = validRows.map(r => formatDate(r.date)).join(', ');
       await sendEmailViaClaudeAPI(
         cfg.fromEmail,
@@ -2263,6 +2285,44 @@ function clearRequestForm() {
   const rowsContainer = document.getElementById('req-rows-container');
   if (rowsContainer) rowsContainer.innerHTML = '';
   requestRowCount = 1;
+}
+
+// ── REQUEST MODAL: staff vs. student entry points ─────
+let requestModalStudentMode = false;
+
+function setRequestModalLocked(locked) {
+  requestModalStudentMode = locked;
+  ['req-name', 'req-email', 'req-uni', 'req-total'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) { el.readOnly = locked; el.style.background = locked ? 'var(--gray-50)' : ''; }
+  });
+  const pickerGroup = document.getElementById('req-student-picker-group');
+  if (pickerGroup) pickerGroup.style.display = locked ? 'none' : '';
+  const lockedNote = document.getElementById('req-student-locked-note');
+  if (lockedNote) lockedNote.style.display = locked ? 'block' : 'none';
+}
+
+function openStaffRequestModal(prefillDate) {
+  clearRequestForm();
+  setRequestModalLocked(false);
+  if (prefillDate) document.getElementById('req-date').value = prefillDate;
+  openModal('request-modal');
+}
+
+function openStudentRequestModal(prefillDate) {
+  clearRequestForm();
+  setRequestModalLocked(true);
+  document.getElementById('req-name').value = window._studentPortalName || '';
+  document.getElementById('req-email').value = window._studentPortalEmail || '';
+  document.getElementById('req-uni').value = window._studentPortalUniversity || '';
+  document.getElementById('req-total').value = window._studentPortalTotalHours || '';
+  if (prefillDate) document.getElementById('req-date').value = prefillDate;
+  openModal('request-modal');
+}
+
+function openCalendarRequestModal(prefillDate) {
+  if (sessionStorage.getItem('tps_auth') === 'student') openStudentRequestModal(prefillDate);
+  else openStaffRequestModal(prefillDate);
 }
 
 function calcHours(start, end) {
@@ -2348,6 +2408,8 @@ async function lookupStudent() {
   window._studentPortalEmail = first['Student Email'] || val;
   window._studentPortalName = studentName;
   window._studentPortalId = first['Student ID'] || '';
+  window._studentPortalUniversity = first['University'] || '';
+  window._studentPortalTotalHours = totalReq || '';
 
   // Pace tracker
   renderPaceTracker(totalDone, totalReq, first['Session Date'] ? sessions[sessions.length-1]['Session Date'] : null);
@@ -2731,7 +2793,7 @@ function renderRiskBanner(sessions) {
 // ══════════════════════════════════════════════════════════════
 // FEATURE 2: CAPACITY LIMITS
 // ══════════════════════════════════════════════════════════════
-function getCapacityLimit() { return parseInt(localStorage.getItem('capacity_limit') || '3'); }
+function getCapacityLimit() { return parseInt(localStorage.getItem('capacity_limit') || '4'); }
 function saveCapacity() {
   const val = parseInt(document.getElementById('capacity-limit').value);
   if (!val || val < 1) { alert('Enter a valid number.'); return; }
@@ -3216,9 +3278,17 @@ switchMode = function(mode) {
 const _origSubmitRequest = submitRequest;
 submitRequest = async function() {
   const date = document.getElementById('req-date').value;
+  capacityOverride = null;
   if (date) {
     if (isBlackout(date)) { alert('Sorry — ' + formatDate(date) + ' is a clinic closure date and is not available for scheduling. Please choose a different date.'); return; }
-    if (isAtCapacity(date)) { alert('Sorry — ' + formatDate(date) + ' is fully booked (at maximum capacity of ' + getCapacityLimit() + ' students). Please choose a different date.'); return; }
+    if (isAtCapacity(date)) {
+      const pw = prompt(`${formatDate(date)} is fully booked (at maximum capacity of ${getCapacityLimit()} students).\n\nStaff can override this and auto-approve the session by entering the staff password:`);
+      if (pw === null) return;
+      if (pw !== getStaffPassword()) { alert('Incorrect staff password. Session not added.'); return; }
+      const approverName = prompt('Enter your name (Preceptor/Coordinator) to approve this session:');
+      if (!approverName) return;
+      capacityOverride = { name: approverName };
+    }
   }
   await _origSubmitRequest.apply(this, arguments);
 };
