@@ -50,7 +50,7 @@ export default async (req: Request, context: Context) => {
     }
 
     const fields: Record<string, any> = {
-      "Student": [studentRecordId],
+      "Students": [studentRecordId],
       "Unavailable Start Date": startDate,
       "Unavailable End Date": endDate,
     };

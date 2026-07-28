@@ -1676,9 +1676,16 @@ function showNoToken() {
 
 // ── LOAD SESSIONS ─────────────────────────────────────
 async function loadSessions() {
-  const data = await airtableRequest('GET', '?pageSize=100&sort[0][field]=Session%20Date&sort[0][direction]=desc');
-  if (!data) return;
-  allSessions = (data.records || []).map(r => ({ id: r.id, ...r.fields }));
+  let all = [];
+  let offset = '';
+  do {
+    const path = `?pageSize=100&sort[0][field]=Session%20Date&sort[0][direction]=desc${offset ? '&offset=' + offset : ''}`;
+    const data = await airtableRequest('GET', path);
+    if (!data) return;
+    all = all.concat(data.records || []);
+    offset = data.offset || '';
+  } while (offset);
+  allSessions = all.map(r => ({ id: r.id, ...r.fields }));
   updateStats(allSessions);
   renderTable();
 }
@@ -2624,7 +2631,7 @@ function renderStudentUnavailability(records) {
   }
   list.innerHTML = records.map(r => {
     const f = r.fields;
-    const studentId = (f['Student'] || [])[0];
+    const studentId = (f['Students'] || [])[0];
     const student = studentDirectory.find(s => s.id === studentId);
     const name = student ? (student['Student Name'] || 'Unknown student') : 'Unknown student';
     const start = f['Unavailable Start Date'] || '—';
