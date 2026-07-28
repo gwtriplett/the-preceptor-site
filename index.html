@@ -2214,31 +2214,51 @@ async function submitRequest() {
 
   const override = capacityOverride;
   const today = new Date().toISOString().split('T')[0];
-  const records = validRows.map(r => {
-    const hrs = parseFloat(r.hours) || calcHours(r.start, r.end);
-    const fields = {
-      'Session Name': `${name} — ${formatDate(r.date)}`,
-      'Student Name': name, 'Student Email': email,
-      'University': uni,
-      'Session Date': r.date, 'Start Time': r.start, 'End Time': r.end,
-      'Hours This Session': hrs,
-      'Clinical Focus': r.focus,
-      'Student Notes': r.notes,
-      'Total Hours Required': total,
-      'Approval Status': override ? 'Approved' : 'Pending'
-    };
-    if (override) {
-      fields['Approved By'] = override.name;
-      fields['Approved Date'] = today;
-    }
-    return { fields };
-  });
-
   let created = 0;
-  for (let i = 0; i < records.length; i += 10) {
-    const batch = records.slice(i, i + 10);
-    const res = await airtableRequest('POST', '', { records: batch });
-    if (res) created += batch.length;
+
+  if (requestModalStudentMode) {
+    // Students don't have the staff password airtable-write requires, so their
+    // requests go through a separate public endpoint that always forces new
+    // sessions to Pending server-side, regardless of any override state here.
+    try {
+      const resp = await fetch('/.netlify/functions/session-request-submit', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ studentName: name, studentEmail: email, university: uni, totalHours: total, sessions: validRows })
+      });
+      const data = await resp.json();
+      if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
+      created = data.created || 0;
+    } catch (e) {
+      console.error(e);
+      alert('Could not submit: ' + e.message);
+    }
+  } else {
+    const records = validRows.map(r => {
+      const hrs = parseFloat(r.hours) || calcHours(r.start, r.end);
+      const fields = {
+        'Session Name': `${name} — ${formatDate(r.date)}`,
+        'Student Name': name, 'Student Email': email,
+        'University': uni,
+        'Session Date': r.date, 'Start Time': r.start, 'End Time': r.end,
+        'Hours This Session': hrs,
+        'Clinical Focus': r.focus,
+        'Student Notes': r.notes,
+        'Total Hours Required': total,
+        'Approval Status': override ? 'Approved' : 'Pending'
+      };
+      if (override) {
+        fields['Approved By'] = override.name;
+        fields['Approved Date'] = today;
+      }
+      return { fields };
+    });
+
+    for (let i = 0; i < records.length; i += 10) {
+      const batch = records.slice(i, i + 10);
+      const res = await airtableRequest('POST', '', { records: batch });
+      if (res) created += batch.length;
+    }
   }
   capacityOverride = null;
 
