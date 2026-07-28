@@ -2127,12 +2127,17 @@ async function loadStudentDirectory() {
   }
 }
 
+function isSchedulableStudent(s) {
+  const status = s['Pipeline Status'] || '';
+  return status.includes('Active Rotation') || status.includes('Enrollment Completed');
+}
+
 function populateStudentPicker(prefix) {
   const sel = document.getElementById(`${prefix}-student-picker`);
   if (!sel) return;
   const current = sel.value;
   sel.innerHTML = '<option value="">+ New / Manual Entry…</option>' +
-    studentDirectory.map(s => `<option value="${s.id}">${s['Student Name'] || 'Unnamed'}${s['University / College'] ? ' — ' + s['University / College'] : ''}</option>`).join('');
+    studentDirectory.filter(isSchedulableStudent).map(s => `<option value="${s.id}">${s['Student Name'] || 'Unnamed'}${s['Semester / Quarter'] ? ' (' + s['Semester / Quarter'] + ')' : ''}</option>`).join('');
   sel.value = current;
 }
 
