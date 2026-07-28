@@ -8,6 +8,15 @@ function isValidDate(d: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(d) && !isNaN(new Date(d + "T00:00:00").getTime());
 }
 
+// A student can have multiple Students records (one per semester/quarter). When
+// several match the same email, prefer whichever enrollment is actually current.
+function statusRank(pipelineStatus: string): number {
+  const s = pipelineStatus || "";
+  if (s.includes("Active Rotation")) return 0;
+  if (s.includes("Enrollment Completed")) return 1;
+  return 2;
+}
+
 export default async (req: Request, context: Context) => {
   if (req.method !== "POST") {
     return new Response(JSON.stringify({ error: "Use POST" }), { status: 405 });
@@ -44,7 +53,13 @@ export default async (req: Request, context: Context) => {
     if (!lookupResp.ok) {
       return new Response(JSON.stringify({ error: lookupData?.error?.message || "Could not look up student record." }), { status: lookupResp.status });
     }
-    const studentRecordId = lookupData?.records?.[0]?.id;
+    const candidates = (lookupData?.records || []) as any[];
+    candidates.sort((a, b) => {
+      const byStatus = statusRank(a.fields?.["Pipeline Status"]) - statusRank(b.fields?.["Pipeline Status"]);
+      if (byStatus !== 0) return byStatus;
+      return (b.createdTime || "").localeCompare(a.createdTime || "");
+    });
+    const studentRecordId = candidates[0]?.id;
     if (!studentRecordId) {
       return new Response(JSON.stringify({ error: "Could not find a student record for that email." }), { status: 404 });
     }

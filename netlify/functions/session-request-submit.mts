@@ -2,6 +2,17 @@ import type { Context, Config } from "@netlify/functions";
 
 const SESSIONS_BASE_ID = "appXyJfoZAiVyyCwE";
 const SESSIONS_TABLE_ID = "tblxwz24LDstMVrSI";
+const STUDENTS_BASE_ID = "appf6D9Nbhb5Wg43L";
+const STUDENTS_TABLE_ID = "tblesg1u5m2ec3cgg";
+
+// A student can have multiple Students records (one per semester/quarter). When
+// several match the same email, prefer whichever enrollment is actually current.
+function statusRank(pipelineStatus: string): number {
+  const s = pipelineStatus || "";
+  if (s.includes("Active Rotation")) return 0;
+  if (s.includes("Enrollment Completed")) return 1;
+  return 2;
+}
 
 function calcHours(start: string, end: string): number {
   if (!start || !end) return 0;
@@ -50,6 +61,27 @@ export default async (req: Request, context: Context) => {
     return new Response(JSON.stringify({ error: "Server is missing AIRTABLE_TOKEN. Set it in Netlify Site settings > Environment variables." }), { status: 500 });
   }
 
+  // Resolve the specific Students enrollment record for this email (best-effort —
+  // if this fails or finds nothing, sessions still get created, just without the
+  // link; lookupStudent() falls back to matching by email in that case).
+  let studentRecordId: string | null = null;
+  try {
+    const lookupUrl = `https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${STUDENTS_TABLE_ID}?filterByFormula=${encodeURIComponent(`LOWER({Email})="${studentEmail.toLowerCase()}"`)}`;
+    const lookupResp = await fetch(lookupUrl, { headers: { Authorization: `Bearer ${token}` } });
+    const lookupData: any = await lookupResp.json();
+    if (lookupResp.ok) {
+      const candidates = (lookupData?.records || []) as any[];
+      candidates.sort((a, b) => {
+        const byStatus = statusRank(a.fields?.["Pipeline Status"]) - statusRank(b.fields?.["Pipeline Status"]);
+        if (byStatus !== 0) return byStatus;
+        return (b.createdTime || "").localeCompare(a.createdTime || "");
+      });
+      if (candidates.length) studentRecordId = candidates[0].id;
+    }
+  } catch {
+    // Non-fatal — proceed without the link.
+  }
+
   // Strict allowlist, same spirit as intake-submit.mts — this is a public endpoint,
   // so status/approval fields are always forced server-side and never trusted from the client.
   const records = validRows.map((r: any) => {
@@ -71,6 +103,7 @@ export default async (req: Request, context: Context) => {
         "Student Notes": (r.notes || "").toString().trim(),
         "Total Hours Required": totalHours,
         "Approval Status": "Pending",
+        ...(studentRecordId ? { "Student ID (Airtable)": studentRecordId } : {}),
       },
     };
   });

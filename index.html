@@ -2246,6 +2246,10 @@ async function submitRequest() {
       alert('Could not submit: ' + e.message);
     }
   } else {
+    // If staff picked an existing student from the dropdown (rather than Manual
+    // Entry), that's the exact enrollment record — link new sessions to it so
+    // hours count against the right semester.
+    const pickedStudentId = document.getElementById('req-student-picker')?.value || '';
     const records = validRows.map(r => {
       const hrs = parseFloat(r.hours) || calcHours(r.start, r.end);
       const fields = {
@@ -2259,6 +2263,7 @@ async function submitRequest() {
         'Total Hours Required': total,
         'Approval Status': override ? 'Approved' : 'Pending'
       };
+      if (pickedStudentId) fields['Student ID (Airtable)'] = pickedStudentId;
       if (override) {
         fields['Approved By'] = override.name;
         fields['Approved Date'] = today;
@@ -2371,88 +2376,111 @@ async function lookupStudent() {
 
   // Detect whether val is a Student ID (YY-XXXX) or email
   const isStudentId = /^\d{2}-\d{4}$/.test(val);
-  let data;
+  let studentRecord = null; // the specific Students enrollment record we resolve to
+  let sessions = [];
 
-  if (isStudentId) {
-    // Look up the student's email from the Students base using their ID
-    // then search sessions by that email
-    try {
+  try {
+    if (isStudentId) {
+      // A Student ID already identifies one specific semester's enrollment record.
       const studentsData = await atRead(STUDENTS_BASE_ID, STUDENTS_TABLE_ID, `?filterByFormula=LOWER({Student ID})="${val.toLowerCase()}"`);
       if (!studentsData) throw new Error('Could not reach the server.');
-      const matched = (studentsData.records || []);
-      if (matched.length === 0) {
+      const matched = studentsData.records || [];
+      const studentEmail = matched.length ? (matched[0].fields['Email'] || '') : '';
+      if (matched.length === 0 || !studentEmail) {
         document.getElementById('student-results').style.display = 'none';
         document.getElementById('student-empty').style.display = 'block';
         return;
       }
-      // Get the email from the first matched student record
-      const studentEmail = matched[0].fields['Email'] || matched[0].fields['email'] || '';
-      if (!studentEmail) {
-        document.getElementById('student-results').style.display = 'none';
-        document.getElementById('student-empty').style.display = 'block';
-        return;
-      }
-      // Now look up sessions using that email
-      data = await airtableRequest('GET', `?filterByFormula=LOWER({Student Email})="${studentEmail.toLowerCase()}"&sort[0][field]=Session Date&sort[0][direction]=asc`);
-      // Update the lookup field with the resolved email for display consistency
+      studentRecord = { id: matched[0].id, ...matched[0].fields };
       document.getElementById('student-email-lookup').value = studentEmail;
-    } catch(e) {
-      console.error(e);
-      alert('Could not look up Student ID. Please try your email address instead.');
-      return;
-    }
-  } else {
-    // Standard email lookup
-    data = await airtableRequest('GET', `?filterByFormula=LOWER({Student Email})="${val.toLowerCase()}"&sort[0][field]=Session Date&sort[0][direction]=asc`);
-  }
 
-  if (!data) return;
-  const sessions = (data.records || []).map(r => ({ id: r.id, ...r.fields }));
-  if (sessions.length === 0) {
-    document.getElementById('student-results').style.display = 'none';
-    document.getElementById('student-empty').style.display = 'block';
+      // Sessions linked to this specific enrollment; fall back to an email match
+      // for any legacy rows that predate this link.
+      let data = await airtableRequest('GET', `?filterByFormula=LOWER({Student ID (Airtable)})="${studentRecord.id.toLowerCase()}"&sort[0][field]=Session Date&sort[0][direction]=asc`);
+      sessions = data ? (data.records || []).map(r => ({ id: r.id, ...r.fields })) : [];
+      if (sessions.length === 0) {
+        data = await airtableRequest('GET', `?filterByFormula=LOWER({Student Email})="${studentEmail.toLowerCase()}"&sort[0][field]=Session Date&sort[0][direction]=asc`);
+        sessions = data ? (data.records || []).map(r => ({ id: r.id, ...r.fields })) : [];
+      }
+    } else {
+      // Email lookup — the same person can have multiple enrollment records (one
+      // per semester/quarter). Resolve to whichever one actually has sessions, so
+      // a past completed rotation's hours never get mixed into a current one.
+      const studentsData = await atRead(STUDENTS_BASE_ID, STUDENTS_TABLE_ID, `?filterByFormula=LOWER({Email})="${val.toLowerCase()}"`);
+      const candidates = ((studentsData && studentsData.records) || []).map(r => ({ id: r.id, ...r.fields }));
+      if (candidates.length === 0) {
+        document.getElementById('student-results').style.display = 'none';
+        document.getElementById('student-empty').style.display = 'block';
+        return;
+      }
+      const data = await airtableRequest('GET', `?filterByFormula=LOWER({Student Email})="${val.toLowerCase()}"&sort[0][field]=Session Date&sort[0][direction]=asc`);
+      const allSessionsForEmail = data ? (data.records || []).map(r => ({ id: r.id, ...r.fields })) : [];
+
+      const countFor = (id) => allSessionsForEmail.filter(s => s['Student ID (Airtable)'] === id).length;
+      const statusRank = (s) => {
+        const st = s['Pipeline Status'] || '';
+        if (st.includes('Active Rotation')) return 0;
+        if (st.includes('Enrollment Completed')) return 1;
+        return 2;
+      };
+      candidates.sort((a, b) => {
+        const byCount = countFor(b.id) - countFor(a.id);
+        if (byCount !== 0) return byCount;
+        const byStatus = statusRank(a) - statusRank(b);
+        if (byStatus !== 0) return byStatus;
+        return (b.createdTime || '').localeCompare(a.createdTime || '');
+      });
+      studentRecord = candidates[0];
+      sessions = allSessionsForEmail.filter(s => s['Student ID (Airtable)'] === studentRecord.id);
+      // Nothing tagged to this record yet (e.g. brand new) — show whatever exists under the email
+      // rather than an empty portal, so legacy/untagged rows still surface.
+      if (sessions.length === 0) sessions = allSessionsForEmail;
+    }
+  } catch (e) {
+    console.error(e);
+    alert('Could not look up your record. Please try again or contact your coordinator.');
     return;
   }
+
   document.getElementById('student-empty').style.display = 'none';
   document.getElementById('student-results').style.display = 'block';
-  const first = sessions[0];
-  const totalReq = first['Total Hours Required'] || 0;
-  const signedOffDone = sessions.filter(s => s['Hours Signed Off']).reduce((a,s) => a + (s['Hours Signed Off'] || 0), 0);
 
-  // Include any manually-entered prior hours (e.g. hours completed before this scheduler was in use)
-  let priorHours = 0;
-  try {
-    const priorData = await atRead(STUDENTS_BASE_ID, STUDENTS_TABLE_ID, `?filterByFormula=LOWER({Email})="${(first['Student Email']||'').toLowerCase()}"`);
-    priorHours = (priorData && priorData.records && priorData.records[0] && priorData.records[0].fields['Prior Hours Completed']) || 0;
-  } catch(e) { console.error('Could not fetch prior hours', e); }
+  const totalReq = studentRecord['Total Hours Required'] || 0;
+  const signedOffDone = sessions.filter(s => s['Hours Signed Off']).reduce((a,s) => a + (s['Hours Signed Off'] || 0), 0);
+  const priorHours = studentRecord['Prior Hours Completed'] || 0;
 
   const totalDone = signedOffDone + priorHours;
   const pct = totalReq ? Math.min(100, Math.round(totalDone / totalReq * 100)) : 0;
-  const studentName = first['Student Name'] || val;
+  const studentName = studentRecord['Student Name'] || val;
   document.getElementById('s-name').textContent = studentName;
-  document.getElementById('s-meta').textContent = `${first['University'] || 'University not set'} · ${totalReq} hours required`;
+  document.getElementById('s-meta').textContent = `${studentRecord['University / College'] || 'University not set'} · ${totalReq} hours required`;
   document.getElementById('s-hours-done').textContent = totalDone.toFixed(1);
   document.getElementById('s-hours-left').textContent = Math.max(0, totalReq - totalDone).toFixed(1);
   document.getElementById('s-progress-bar').style.width = pct + '%';
   document.getElementById('s-progress-label').textContent = `${totalDone.toFixed(1)} of ${totalReq} hours complete (${pct}%)`;
 
   // Store globals for student portal features
-  window._studentPortalEmail = first['Student Email'] || val;
+  window._studentPortalEmail = studentRecord['Email'] || val;
   window._studentPortalName = studentName;
-  window._studentPortalId = first['Student ID'] || '';
-  window._studentPortalUniversity = first['University'] || '';
+  window._studentPortalId = studentRecord['Student ID'] || '';
+  window._studentPortalUniversity = studentRecord['University / College'] || '';
   window._studentPortalTotalHours = totalReq || '';
+  window._studentPortalRecordId = studentRecord.id;
 
   // Pace tracker
-  renderPaceTracker(totalDone, totalReq, first['Session Date'] ? sessions[sessions.length-1]['Session Date'] : null);
+  const lastDate = sessions.length ? sessions[sessions.length - 1]['Session Date'] : (studentRecord['Requested End Date'] || null);
+  renderPaceTracker(totalDone, totalReq, lastDate);
 
   // Completion certificate button
   const certBtn = document.getElementById('s-cert-download');
   if (certBtn) certBtn.style.display = (pct >= 100 && totalDone > 0) ? 'flex' : 'none';
 
-  // Load objectives from first session record (set from Students table data if available)
+  // Load objectives — prefer the most recent session's, fall back to the Students record's on file
   const objEl = document.getElementById('s-objectives-text');
-  if (objEl) objEl.textContent = first['Clinical Focus'] || 'No learning objectives on file. Contact your coordinator to update.';
+  if (objEl) {
+    const sessionFocus = sessions.length ? sessions[sessions.length - 1]['Clinical Focus'] : '';
+    objEl.textContent = sessionFocus || studentRecord['Clinical Focus / Objectives'] || 'No learning objectives on file. Contact your coordinator to update.';
+  }
 
   // Render doc submission statuses
   renderDocStatuses();
@@ -2733,7 +2761,7 @@ Please update the session status in the scheduler and reply to confirm the cance
 
 // ── STUDENT CERT DOWNLOAD ─────────────────────────────
 function studentDownloadCert() {
-  document.getElementById('cert-student').value = window._studentPortalEmail || '';
+  document.getElementById('cert-student').value = window._studentPortalRecordId || window._studentPortalEmail || '';
   switchMode('planning', { target: document.querySelectorAll('.mode-tab')[4] });
   setTimeout(() => {
     setPortalTab && document.getElementById('cert-preceptor') && document.getElementById('cert-preceptor').focus();
@@ -2932,6 +2960,7 @@ async function createRecurringSessions() {
   const focus = document.getElementById('recur-focus').value;
   if (!confirm(`Create ${dates.length} sessions for ${name}?`)) return;
   const cap = getCapacityLimit();
+  const pickedStudentId = document.getElementById('recur-student-picker')?.value || '';
   let blocked = 0;
   const records = dates.filter(ds => {
     if (getSessionsOnDate(ds) >= cap) { blocked++; return false; }
@@ -2941,7 +2970,8 @@ async function createRecurringSessions() {
     'Student Name': name, 'Student Email': email, 'University': uni,
     'Session Date': ds, 'Start Time': tStart, 'End Time': tEnd,
     'Hours This Session': hrs, 'Clinical Focus': focus,
-    'Total Hours Required': total, 'Approval Status': 'Pending'
+    'Total Hours Required': total, 'Approval Status': 'Pending',
+    ...(pickedStudentId ? { 'Student ID (Airtable)': pickedStudentId } : {})
   }}));
   if (records.length === 0) { alert('All requested dates are at capacity. Please choose different dates.'); return; }
   // batch into groups of 10
@@ -2976,14 +3006,24 @@ async function renderRevenuePage() {
     if (!data) throw new Error('Could not reach the server.');
     const students = (data.records || []).map(rec => ({ id: rec.id, ...rec.fields }));
 
-    // Aggregate signed-off hours per student email from sessions
+    // Aggregate signed-off hours per specific enrollment record (not just email —
+    // the same person can have multiple Students rows, one per semester/quarter,
+    // and hours must count against the right one). Falls back to email for any
+    // legacy/untagged session rows.
+    const sessionsByStudentId = {};
     const sessionsByEmail = {};
     allSessions.forEach(s => {
-      const key = s['Student Email'];
-      if (!key) return;
-      if (!sessionsByEmail[key]) sessionsByEmail[key] = { signedOff: 0 };
-      if (s['Hours Signed Off']) sessionsByEmail[key].signedOff += s['Hours Signed Off'];
+      if (s['Hours Signed Off']) {
+        const idKey = s['Student ID (Airtable)'];
+        if (idKey) sessionsByStudentId[idKey] = (sessionsByStudentId[idKey] || 0) + s['Hours Signed Off'];
+        const emailKey = s['Student Email'];
+        if (emailKey) sessionsByEmail[emailKey] = (sessionsByEmail[emailKey] || 0) + s['Hours Signed Off'];
+      }
     });
+    // Only trust the email-based fallback when that email maps to exactly one
+    // Students row — otherwise it can't tell which enrollment the hours belong to.
+    const emailRowCounts = {};
+    students.forEach(s => { const e = s['Email']; if (e) emailRowCounts[e] = (emailRowCounts[e] || 0) + 1; });
 
     // Totals — use Billed Amount and Amount Paid fields directly
     let totalBilled = 0, totalPaid = 0, activeCount = 0;
@@ -3012,7 +3052,7 @@ async function renderRevenuePage() {
 
     tbody.innerHTML = students.map(s => {
       const totalReq  = s['Total Hours Required'] || 0;
-      const done      = (sessionsByEmail[s['Email']] || { signedOff: 0 }).signedOff;
+      const done      = sessionsByStudentId[s.id] || (emailRowCounts[s['Email']] === 1 ? (sessionsByEmail[s['Email']] || 0) : 0);
       const prior     = s['Prior Hours Completed'] || 0;
       const totalDone = done + prior;
       const remaining = Math.max(0, totalReq - totalDone);
@@ -3155,27 +3195,33 @@ async function sendPortalAccessEmails() {
 // ══════════════════════════════════════════════════════════════
 // FEATURE 6: COMPLETION CERTIFICATE
 // ══════════════════════════════════════════════════════════════
+// Group by the specific enrollment record when sessions are linked (preferred —
+// a student with multiple semesters gets one entry per enrollment, not one
+// blended entry), falling back to email for any unlinked legacy rows.
+function certGroupKey(s) { return s['Student ID (Airtable)'] || s['Student Email']; }
+
 function populateCertStudentSelect() {
   const sel = document.getElementById('cert-student');
   if (!sel) return;
-  const students = [...new Map(allSessions.filter(s => s['Student Name']).map(s => [s['Student Email'], s])).values()];
+  const students = [...new Map(allSessions.filter(s => s['Student Name']).map(s => [certGroupKey(s), s])).values()];
   sel.innerHTML = '<option value="">— choose a student —</option>' + students.map(s => {
-    const done = allSessions.filter(x => x['Student Email'] === s['Student Email'] && x['Hours Signed Off']).reduce((a,x) => a+(x['Hours Signed Off']||0), 0);
-    return `<option value="${s['Student Email']}">${s['Student Name']} (${done.toFixed(1)} / ${s['Total Hours Required'] || '?'} hrs)</option>`;
+    const key = certGroupKey(s);
+    const done = allSessions.filter(x => certGroupKey(x) === key && x['Hours Signed Off']).reduce((a,x) => a+(x['Hours Signed Off']||0), 0);
+    return `<option value="${key}">${s['Student Name']} (${done.toFixed(1)} / ${s['Total Hours Required'] || '?'} hrs)</option>`;
   }).join('');
   // Set today's date
   document.getElementById('cert-date').value = new Date().toISOString().split('T')[0];
 }
 
 function generateCert() {
-  const email = document.getElementById('cert-student').value;
+  const certKey = document.getElementById('cert-student').value;
   const preceptor = document.getElementById('cert-preceptor').value.trim();
   const coordinator = document.getElementById('cert-coordinator').value.trim();
   const dateStr = document.getElementById('cert-date').value;
-  if (!email) { alert('Please select a student.'); return; }
+  if (!certKey) { alert('Please select a student.'); return; }
   if (!preceptor) { alert('Please enter the preceptor name.'); return; }
 
-  const studentSessions = allSessions.filter(s => s['Student Email'] === email);
+  const studentSessions = allSessions.filter(s => certGroupKey(s) === certKey);
   const s = studentSessions[0];
   if (!s) { alert('No session data found for this student.'); return; }
 
