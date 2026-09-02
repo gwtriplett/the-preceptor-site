@@ -82,6 +82,28 @@ export default async (req: Request, context: Context) => {
     // Non-fatal — proceed without the link.
   }
 
+  // Reject if this student already has a session on any of the requested dates —
+  // prevents accidental duplicate submissions for the same day.
+  try {
+    const dates = [...new Set(validRows.map((r: any) => (r.date || "").toString()))];
+    const dateClauses = dates.map((d) => `{Session Date}="${d}"`).join(",");
+    const dupFormula = `AND(LOWER({Student Email})="${studentEmail.toLowerCase()}", OR(${dateClauses}))`;
+    const dupUrl = `https://api.airtable.com/v0/${SESSIONS_BASE_ID}/${SESSIONS_TABLE_ID}?filterByFormula=${encodeURIComponent(dupFormula)}`;
+    const dupResp = await fetch(dupUrl, { headers: { Authorization: `Bearer ${token}` } });
+    const dupData: any = await dupResp.json();
+    if (dupResp.ok && (dupData?.records || []).length > 0) {
+      const dupDate = dupData.records[0]?.fields?.["Session Date"];
+      return new Response(
+        JSON.stringify({
+          error: `You already have a request for ${fmtDate(dupDate) || "that date"} — check your pending requests.`,
+        }),
+        { status: 409 }
+      );
+    }
+  } catch {
+    // Non-fatal — if the duplicate check itself fails, fall through and allow submission.
+  }
+
   // Strict allowlist, same spirit as intake-submit.mts — this is a public endpoint,
   // so status/approval fields are always forced server-side and never trusted from the client.
   const records = validRows.map((r: any) => {
