@@ -5,8 +5,8 @@
 import PDFDocument from "pdfkit";
 import nodemailer from "nodemailer";
 
-export const SESSIONS_BASE_ID = "appXyJfoZAiVyyCwE";
-export const SESSIONS_TABLE_ID = "tblxwz24LDstMVrSI";
+export const SESSIONS_BASE_ID = "appf6D9Nbhb5Wg43L";
+export const SESSIONS_TABLE_ID = "tblBC5TiAa8VEII9d";
 
 // Same palette as the main site (index.html --green/--amber/--teal/--red/--gray-400)
 export const STATUS_COLORS: Record<string, string> = {

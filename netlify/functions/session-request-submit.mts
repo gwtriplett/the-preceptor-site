@@ -1,7 +1,7 @@
 import type { Context, Config } from "@netlify/functions";
 
-const SESSIONS_BASE_ID = "appXyJfoZAiVyyCwE";
-const SESSIONS_TABLE_ID = "tblxwz24LDstMVrSI";
+const SESSIONS_BASE_ID = "appf6D9Nbhb5Wg43L";
+const SESSIONS_TABLE_ID = "tblBC5TiAa8VEII9d";
 const STUDENTS_BASE_ID = "appf6D9Nbhb5Wg43L";
 const STUDENTS_TABLE_ID = "tblesg1u5m2ec3cgg";
 

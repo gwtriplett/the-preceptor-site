@@ -1,10 +1,9 @@
 import type { Context, Config } from "@netlify/functions";
 
-// Only these two bases can ever be touched through this function —
+// Only this base can ever be touched through this function —
 // prevents this proxy from being used to reach any other Airtable data.
 const ALLOWED_BASES: Record<string, true> = {
-  "appXyJfoZAiVyyCwE": true, // Sessions
-  "appf6D9Nbhb5Wg43L": true, // Student Management
+  "appf6D9Nbhb5Wg43L": true, // Student Management (also houses Sessions, co-located)
 };
 
 export default async (req: Request, context: Context) => {
