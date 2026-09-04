@@ -1,8 +1,7 @@
 import type { Context, Config } from "@netlify/functions";
 
 const ALLOWED_BASES: Record<string, true> = {
-  "appXyJfoZAiVyyCwE": true, // Sessions
-  "appf6D9Nbhb5Wg43L": true, // Student Management
+  "appf6D9Nbhb5Wg43L": true, // Student Management (also houses Sessions, co-located)
 };
 const ALLOWED_METHODS: Record<string, true> = { GET: true, POST: true, PATCH: true };
 
