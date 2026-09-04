@@ -86,7 +86,7 @@ export default async (req: Request, context: Context) => {
   // prevents accidental duplicate submissions for the same day.
   try {
     const dates = [...new Set(validRows.map((r: any) => (r.date || "").toString()))];
-    const dateClauses = dates.map((d) => `{Session Date}="${d}"`).join(",");
+    const dateClauses = dates.map((d) => `DATESTR({Session Date})="${d}"`).join(",");
     const dupFormula = `AND(LOWER({Student Email})="${studentEmail.toLowerCase()}", OR(${dateClauses}))`;
     const dupUrl = `https://api.airtable.com/v0/${SESSIONS_BASE_ID}/${SESSIONS_TABLE_ID}?filterByFormula=${encodeURIComponent(dupFormula)}`;
     const dupResp = await fetch(dupUrl, { headers: { Authorization: `Bearer ${token}` } });
