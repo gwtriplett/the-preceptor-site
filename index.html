@@ -571,6 +571,12 @@
 
     <div id="req-error-banner" style="display:none;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:12.5px;color:#991b1b;line-height:1.5;"></div>
 
+    <div class="form-group" id="req-rotation-group" style="display:none;margin-bottom:16px;">
+      <label>Which rotation are these dates for? *</label>
+      <select id="req-rotation" onchange="updateRotationHint()" style="width:100%;padding:8px 10px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:13px;"></select>
+      <div id="req-rotation-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
+    </div>
+
     <div class="form-grid" style="margin-bottom:10px">
       <div class="form-group">
         <label>Student Name *</label>
@@ -2391,6 +2397,16 @@ async function submitRequest() {
   let created = 0;
 
   if (requestModalStudentMode) {
+    // Which of the student's (possibly several) paid rotations this batch
+    // belongs to — required so dates get checked against the right
+    // timeframe/hours-cap rather than whichever rotation the server would
+    // otherwise have to guess at.
+    const rotationSel = document.getElementById('req-rotation');
+    const rotationId = rotationSel && !rotationSel.disabled ? rotationSel.value : '';
+    if (!rotationId) {
+      renderRequestError({ error: 'None of your rotations are currently open for scheduling — payment may still be pending, or the clinical period has ended. Contact your coordinator.' });
+      return;
+    }
     // Students don't have the staff password airtable-write requires, so their
     // requests go through a separate public endpoint that always forces new
     // sessions to Pending server-side, regardless of any override state here.
@@ -2402,7 +2418,7 @@ async function submitRequest() {
       const resp = await fetch('/.netlify/functions/session-request-submit', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ studentName: name, studentEmail: email, university: uni, totalHours: total, sessions: validRows })
+        body: JSON.stringify({ studentName: name, studentEmail: email, university: uni, totalHours: total, rotationId, sessions: validRows })
       });
       const data = await resp.json();
       if (!resp.ok) {
@@ -2508,6 +2524,12 @@ function setRequestModalLocked(locked) {
   if (pickerGroup) pickerGroup.style.display = locked ? 'none' : '';
   const lockedNote = document.getElementById('req-student-locked-note');
   if (lockedNote) lockedNote.style.display = locked ? 'block' : 'none';
+  // The rotation picker (which paid rotation this batch's dates belong to)
+  // only applies to the student-facing flow — staff pick an existing
+  // student's exact enrollment record directly and aren't gated by payment
+  // status the same way.
+  const rotationGroup = document.getElementById('req-rotation-group');
+  if (rotationGroup) rotationGroup.style.display = locked ? 'block' : 'none';
 }
 
 function openStaffRequestModal(prefillDate) {
@@ -2517,6 +2539,75 @@ function openStaffRequestModal(prefillDate) {
   openModal('request-modal');
 }
 
+// A rotation is only offered for new scheduling once it's actually paid for
+// and underway — same allowlist session-request-submit.mts enforces
+// server-side. Anything else means payment isn't finished yet or the
+// clinical period is over, so it's left out here as a courtesy (the
+// backend is what actually stops it).
+const ROTATION_SCHEDULABLE_STATUSES = new Set(['Enrollment Completed', '3rd Party Preceptor Enrollment', '🟢 Active Rotation']);
+function isSchedulableRotation(r) {
+  return ROTATION_SCHEDULABLE_STATUSES.has(r['Pipeline Status'] || '');
+}
+
+// Fills the "Which rotation are these dates for?" picker from the
+// student's own rotations, limited to ones currently open for scheduling.
+// A student with 3 paid rotations sees all 3 here and picks whichever one
+// this batch of dates belongs to; the date-range and hours-cap checks (and
+// the hint text below) then apply to that specific rotation.
+function populateRotationPicker() {
+  const sel = document.getElementById('req-rotation');
+  if (!sel) return;
+  const all = window._studentPortalRotations || [];
+  const schedulable = all.filter(isSchedulableRotation);
+  sel.innerHTML = '';
+  if (!schedulable.length) {
+    sel.innerHTML = '<option value="">No rotation currently open for scheduling</option>';
+    sel.disabled = true;
+    updateRotationHint();
+    return;
+  }
+  sel.disabled = false;
+  // Same ordering the portal header uses to guess the "current" one —
+  // reused here only to decide which option is pre-selected by default.
+  const byRecency = [...schedulable].sort((a, b) => (b.createdTime || '').localeCompare(a.createdTime || ''));
+  const preferred = pickCurrentRotation(schedulable) || byRecency[0];
+  schedulable
+    .sort((a, b) => (a['Requested Start Date'] || '').localeCompare(b['Requested Start Date'] || ''))
+    .forEach(r => {
+      const opt = document.createElement('option');
+      opt.value = r.id;
+      const start = r['Requested Start Date'] ? formatDate(r['Requested Start Date']) : '?';
+      const end = r['Requested End Date'] ? formatDate(r['Requested End Date']) : '?';
+      opt.textContent = `${r['Course Name'] || 'Rotation'} — ${r['Semester / Quarter'] || ''} (${start} – ${end})`;
+      if (preferred && r.id === preferred.id) opt.selected = true;
+      sel.appendChild(opt);
+    });
+  updateRotationHint();
+}
+
+// Shows the selected rotation's window/hours-goal beneath the picker, and
+// keeps "Total Hours Required" in sync with that specific rotation's goal
+// rather than the student's grand total across every rotation.
+function updateRotationHint() {
+  const sel = document.getElementById('req-rotation');
+  const hint = document.getElementById('req-rotation-hint');
+  if (!sel || !hint) return;
+  const rotations = window._studentPortalRotations || [];
+  const chosen = rotations.find(r => r.id === sel.value);
+  if (!chosen) {
+    hint.textContent = requestModalStudentMode
+      ? 'Contact your coordinator — none of your rotations are open for scheduling (payment pending or clinical period ended).'
+      : '';
+    return;
+  }
+  const start = chosen['Requested Start Date'] ? formatDate(chosen['Requested Start Date']) : '?';
+  const end = chosen['Requested End Date'] ? formatDate(chosen['Requested End Date']) : '?';
+  const goal = chosen['Hours Goal'];
+  hint.textContent = `Dates must fall between ${start} and ${end}` + (goal != null ? ` · up to ${Math.round(goal * 1.1 * 10) / 10} hours (${goal} paid + 10% buffer)` : '');
+  const totalEl = document.getElementById('req-total');
+  if (totalEl && goal != null) totalEl.value = goal;
+}
+
 function openStudentRequestModal(prefillDate) {
   clearRequestForm();
   setRequestModalLocked(true);
@@ -2524,6 +2615,7 @@ function openStudentRequestModal(prefillDate) {
   document.getElementById('req-email').value = window._studentPortalEmail || '';
   document.getElementById('req-uni').value = window._studentPortalUniversity || '';
   document.getElementById('req-total').value = window._studentPortalTotalHours || '';
+  populateRotationPicker();
   if (prefillDate) document.getElementById('req-date').value = prefillDate;
   openModal('request-modal');
 }

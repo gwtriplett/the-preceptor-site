@@ -6,6 +6,16 @@ const STUDENTS_BASE_ID = "appf6D9Nbhb5Wg43L";
 const STUDENTS_TABLE_ID = "tblesg1u5m2ec3cgg";
 const ROTATIONS_TABLE_ID = "tbl6l75OeBLNzSp0i";
 
+// A rotation is only open for new session requests once it's actually paid
+// for and underway — matches the Rotations table's Pipeline Status choices.
+// Anything else means payment isn't complete yet (Inquiry Received,
+// Contract Sent, Awaiting Payment) or the clinical period is over/void
+// (Completed, Withdrawn, Terminated, or a bare "New Application").
+const SCHEDULABLE_STATUSES = new Set(["Enrollment Completed", "3rd Party Preceptor Enrollment", "🟢 Active Rotation"]);
+function isSchedulable(rotation: any): boolean {
+  return SCHEDULABLE_STATUSES.has(rotation?.fields?.["Pipeline Status"] || "");
+}
+
 // Picks which of a student's Rotations a new session request belongs to —
 // the same rule the student portal uses to choose which rotation to show in
 // its header: prefer one whose requested dates span today, then an Active
@@ -70,6 +80,11 @@ export default async (req: Request, context: Context) => {
   const university = (input.university || "").toString().trim();
   const totalHours = Number(input.totalHours) || 0;
   const sessions = Array.isArray(input.sessions) ? input.sessions : [];
+  // Which of the student's (possibly several) rotations this batch belongs
+  // to. The portal now lets the student pick this explicitly when they have
+  // more than one open rotation — required, not just a hint, once we've
+  // resolved the student below.
+  const requestedRotationId = (input.rotationId || "").toString().trim() || null;
 
   if (!studentName || !studentEmail) {
     return new Response(JSON.stringify({ error: "Student name and email are required." }), { status: 400 });
@@ -89,13 +104,13 @@ export default async (req: Request, context: Context) => {
   // that student's linked Rotations) this request belongs to. Students no
   // longer repeats per semester — one Student record covers every term, and
   // term-specific status/hours/dates live on Rotations — so lookup is by
-  // email first, Rotation second. Best-effort: if this fails or finds
-  // nothing, sessions still get created, just without the link(s);
-  // lookupStudent() on the portal falls back to matching by email.
+  // email first, Rotation second.
   let studentRecordId: string | null = null;
   let rotationRecordId: string | null = null;
   let rotationHoursGoal: number | null = null;
   let rotation: any = null;
+  let rotationLookupFailed = false;
+  let studentHasAnyRotations = false;
   try {
     const lookupUrl = `https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${STUDENTS_TABLE_ID}?filterByFormula=${encodeURIComponent(`LOWER({Email})="${studentEmail.toLowerCase()}"`)}`;
     const lookupResp = await fetch(lookupUrl, { headers: { Authorization: `Bearer ${token}` } });
@@ -109,36 +124,77 @@ export default async (req: Request, context: Context) => {
       if (student) {
         studentRecordId = student.id;
         const rotationIds: string[] = student.fields?.["Rotations"] || [];
+        studentHasAnyRotations = rotationIds.length > 0;
         if (rotationIds.length) {
           const rotFormula = `OR(${rotationIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
           const rotUrl = `https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${ROTATIONS_TABLE_ID}?filterByFormula=${encodeURIComponent(rotFormula)}`;
           const rotResp = await fetch(rotUrl, { headers: { Authorization: `Bearer ${token}` } });
           const rotData: any = await rotResp.json();
           if (rotResp.ok) {
-            rotation = pickCurrentRotation(rotData?.records || []);
+            const studentRotations = (rotData?.records || []) as any[];
+            // A rotation this student paid for and is (or was) actively in —
+            // never a rotation still pending payment, or one that's already
+            // finished/withdrawn/terminated. Checked here regardless of how
+            // the rotation was chosen, since the client's own filtering is
+            // only a convenience, never the enforcement.
+            const schedulable = studentRotations.filter(isSchedulable);
+
+            if (requestedRotationId) {
+              // The student explicitly picked one of their rotations (the
+              // usual path once they have more than one paid rotation on
+              // file) — it must be both theirs and currently schedulable.
+              const picked = studentRotations.find((r) => r.id === requestedRotationId);
+              if (picked && isSchedulable(picked)) {
+                rotation = picked;
+              }
+              // If picked-but-not-schedulable, or not found among their own
+              // rotations at all, `rotation` stays null and the generic
+              // "no schedulable rotation" response below explains why.
+            } else {
+              // No explicit pick (older client, or the student has exactly
+              // one option) — fall back to the best-guess "current" one,
+              // chosen only from rotations that are actually schedulable.
+              rotation = pickCurrentRotation(schedulable);
+            }
+
             if (rotation) {
               rotationRecordId = rotation.id;
               if (typeof rotation.fields?.["Hours Goal"] === "number") {
                 rotationHoursGoal = rotation.fields["Hours Goal"];
               }
             }
+          } else {
+            rotationLookupFailed = true;
           }
         }
       }
+    } else {
+      rotationLookupFailed = true;
     }
   } catch {
-    // Non-fatal — proceed without the link(s).
+    rotationLookupFailed = true;
   }
 
-  // A session request must fall within the timeframe the student actually
-  // requested/paid for, and can't schedule past 110% of the hours they paid
-  // for (Hours Goal). Without a resolved Rotation there's no timeframe or
-  // cap to check against, so we can't safely let scheduling through.
+  // A session request must fall within the timeframe of a specific Rotation
+  // the student actually paid for and is (or was) active in, and can't
+  // schedule past 110% of that Rotation's hours. Without one resolved,
+  // there's no timeframe or cap to check against, so we can't let
+  // scheduling through — except when the *lookup itself* failed (a
+  // transient read error), where we'd rather not block a legitimate
+  // request over our own flakiness.
   if (!rotationRecordId || !rotation) {
-    return new Response(
-      JSON.stringify({ error: "We couldn't find an active rotation on file for you. Please contact your coordinator before scheduling sessions." }),
-      { status: 409 }
-    );
+    if (rotationLookupFailed) {
+      return new Response(
+        JSON.stringify({ error: "We couldn't verify your rotation just now. Please try again in a moment." }),
+        { status: 502 }
+      );
+    }
+    const message = requestedRotationId
+      ? "That rotation isn't open for scheduling right now — its payment may still be pending, or its clinical period has ended. Contact your coordinator if this seems wrong."
+      : studentHasAnyRotations
+      ? "None of your rotations are currently open for scheduling — payment may still be pending, or the clinical period has ended. Contact your coordinator."
+      : "We couldn't find an active rotation on file for you. Please contact your coordinator before scheduling sessions.";
+    return new Response(JSON.stringify({ error: message }), { status: 409 });
   }
 
   // Both checks below always run — a batch can fail either or both, and the
