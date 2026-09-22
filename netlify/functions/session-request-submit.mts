@@ -95,6 +95,7 @@ export default async (req: Request, context: Context) => {
   let studentRecordId: string | null = null;
   let rotationRecordId: string | null = null;
   let rotationHoursGoal: number | null = null;
+  let rotation: any = null;
   try {
     const lookupUrl = `https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${STUDENTS_TABLE_ID}?filterByFormula=${encodeURIComponent(`LOWER({Email})="${studentEmail.toLowerCase()}"`)}`;
     const lookupResp = await fetch(lookupUrl, { headers: { Authorization: `Bearer ${token}` } });
@@ -114,7 +115,7 @@ export default async (req: Request, context: Context) => {
           const rotResp = await fetch(rotUrl, { headers: { Authorization: `Bearer ${token}` } });
           const rotData: any = await rotResp.json();
           if (rotResp.ok) {
-            const rotation = pickCurrentRotation(rotData?.records || []);
+            rotation = pickCurrentRotation(rotData?.records || []);
             if (rotation) {
               rotationRecordId = rotation.id;
               if (typeof rotation.fields?.["Hours Goal"] === "number") {
@@ -127,6 +128,64 @@ export default async (req: Request, context: Context) => {
     }
   } catch {
     // Non-fatal — proceed without the link(s).
+  }
+
+  // A session request must fall within the timeframe the student actually
+  // requested/paid for, and can't schedule past 110% of the hours they paid
+  // for (Hours Goal). Without a resolved Rotation there's no timeframe or
+  // cap to check against, so we can't safely let scheduling through.
+  if (!rotationRecordId || !rotation) {
+    return new Response(
+      JSON.stringify({ error: "We couldn't find an active rotation on file for you. Please contact your coordinator before scheduling sessions." }),
+      { status: 409 }
+    );
+  }
+
+  const rotationStart = (rotation.fields?.["Requested Start Date"] || "").toString();
+  const rotationEnd = (rotation.fields?.["Requested End Date"] || "").toString();
+  if (rotationStart && rotationEnd) {
+    const outOfRange = validRows
+      .map((r: any) => (r.date || "").toString())
+      .filter((d: string) => d < rotationStart || d > rotationEnd);
+    if (outOfRange.length) {
+      return new Response(
+        JSON.stringify({
+          error: `${fmtDate(outOfRange[0])} falls outside your requested rotation timeframe (${fmtDate(rotationStart)} – ${fmtDate(rotationEnd)}). Contact your coordinator if your dates need to change.`,
+        }),
+        { status: 400 }
+      );
+    }
+  }
+
+  if (rotationHoursGoal != null) {
+    const cap = rotationHoursGoal * 1.1;
+    const newRequestHours = validRows.reduce(
+      (sum: number, r: any) => sum + (Number(r.hours) || calcHours((r.start || "").toString(), (r.end || "").toString())),
+      0
+    );
+    try {
+      const studentSessionsUrl = `https://api.airtable.com/v0/${SESSIONS_BASE_ID}/${SESSIONS_TABLE_ID}?filterByFormula=${encodeURIComponent(`{Student ID (Airtable)}="${studentRecordId}"`)}`;
+      const studentSessionsResp = await fetch(studentSessionsUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const studentSessionsData: any = await studentSessionsResp.json();
+      if (studentSessionsResp.ok) {
+        const existingHours = ((studentSessionsData?.records || []) as any[])
+          .filter((r) => (r.fields?.["Rotation"] || []).includes(rotationRecordId) && r.fields?.["Approval Status"] !== "Denied")
+          .reduce((sum, r) => sum + (Number(r.fields?.["Hours This Session"]) || 0), 0);
+        if (existingHours + newRequestHours > cap) {
+          const remaining = Math.max(0, Math.round((cap - existingHours) * 100) / 100);
+          return new Response(
+            JSON.stringify({
+              error: `This would put you over your scheduled hours for this rotation. You paid for ${rotationHoursGoal} hours (up to ${cap.toFixed(1)} with the 10% buffer); ${remaining} hour(s) are still available to schedule. Contact your coordinator if you need more hours approved.`,
+            }),
+            { status: 409 }
+          );
+        }
+      }
+      // If the check itself fails, fall through — we'd rather not block a
+      // legitimate request over a transient read error.
+    } catch {
+      // Non-fatal — same reasoning as above.
+    }
   }
 
   // Reject if this student already has a session on any of the requested dates —
