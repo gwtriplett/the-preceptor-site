@@ -257,6 +257,14 @@
 
         <div class="row">
           <div class="field">
+            <label>Course name <span class="req">*</span></label>
+            <input type="text" id="courseName" placeholder="e.g. NUR676L Primary Care Synthesis Practicum" required />
+            <div class="err">Course name is required.</div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="field">
             <label>Requested start date <span class="req">*</span></label>
             <input type="date" id="startDate" required />
             <div class="err">Start date is required.</div>
@@ -443,7 +451,7 @@ function showStep(i){
 function fieldsForStep(i){
   const map = {
     0: ['firstName','lastName','email','phone'],
-    1: ['university','program','semesterQuarter','hoursRequired','startDate','endDate'],
+    1: ['university','program','semesterQuarter','hoursRequired','courseName','startDate','endDate'],
     2: [],
     3: []
   };
@@ -487,6 +495,7 @@ function buildReview(){
       <div class="review-line"><span class="k">Program</span><span class="v">${v('program') || '—'}</span></div>
       <div class="review-line"><span class="k">Semester / Quarter</span><span class="v">${v('semesterQuarter') || '—'}</span></div>
       <div class="review-line"><span class="k">Hours required</span><span class="v">${v('hoursRequired') || '—'}</span></div>
+      <div class="review-line"><span class="k">Course name</span><span class="v">${v('courseName') || '—'}</span></div>
       <div class="review-line"><span class="k">Dates</span><span class="v">${v('startDate') || '—'} to ${v('endDate') || '—'}</span></div>
       ${document.getElementById('additionalPeriod').checked ? `<div class="review-line"><span class="k">Additional period</span><span class="v">${v('addStartDate')||'—'} to ${v('addEndDate')||'—'}</span></div>` : ''}
     </div>
@@ -536,6 +545,7 @@ async function submitIntake(){
     program: document.getElementById('program').value,
     semesterQuarter: document.getElementById('semesterQuarter').value,
     hoursRequired: document.getElementById('hoursRequired').value,
+    courseName: document.getElementById('courseName').value.trim(),
     startDate: document.getElementById('startDate').value,
     endDate: document.getElementById('endDate').value,
     additionalPeriod: document.getElementById('additionalPeriod').checked,
