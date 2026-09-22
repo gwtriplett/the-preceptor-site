@@ -1565,6 +1565,23 @@ function signOut() {
 
 // Check if already authenticated this session
 function checkAuth() {
+  // Direct-link support: a URL like
+  // https://thepreceptorsite.netlify.app/?sid=26-2123 (or ?sid=some@email.com)
+  // logs that student straight into their portal, skipping the login screen.
+  // This is what an Airtable formula field/button links to for "open this
+  // student's portal" — see lookupStudentByUrl() note below for the field formula.
+  const urlParams = new URLSearchParams(window.location.search);
+  const sidParam = (urlParams.get('sid') || '').trim();
+  if (sidParam) {
+    const isStudentId = /^\d{2}-\d{4}$/.test(sidParam);
+    loggedInStudentEmail = sidParam;
+    sessionStorage.setItem('tps_auth', 'student');
+    sessionStorage.setItem('tps_student_email', sidParam);
+    sessionStorage.setItem('tps_student_login_type', isStudentId ? 'id' : 'email');
+    showApp('student');
+    return;
+  }
+
   const auth = sessionStorage.getItem('tps_auth');
   if (auth === 'staff') {
     staffPasswordEntered = sessionStorage.getItem('tps_staff_pw_session') || '';
