@@ -141,25 +141,27 @@ export default async (req: Request, context: Context) => {
     );
   }
 
+  // Both checks below always run — a batch can fail either or both, and the
+  // student needs to see the whole picture in one response so they can fix
+  // everything before resubmitting, rather than discovering problems one at
+  // a time across several round trips.
   const rotationStart = (rotation.fields?.["Requested Start Date"] || "").toString();
   const rotationEnd = (rotation.fields?.["Requested End Date"] || "").toString();
-  if (rotationStart && rotationEnd) {
-    const outOfRange = validRows
-      .map((r: any) => (r.date || "").toString())
-      .filter((d: string) => d < rotationStart || d > rotationEnd);
-    if (outOfRange.length) {
-      return new Response(
-        JSON.stringify({
-          error: `${fmtDate(outOfRange[0])} falls outside your requested rotation timeframe (${fmtDate(rotationStart)} – ${fmtDate(rotationEnd)}). Contact your coordinator if your dates need to change.`,
-        }),
-        { status: 400 }
-      );
-    }
-  }
+  const outOfRangeDates = rotationStart && rotationEnd
+    ? [...new Set(
+        validRows
+          .map((r: any) => (r.date || "").toString())
+          .filter((d: string) => d < rotationStart || d > rotationEnd)
+      )]
+    : [];
 
+  let capExceeded = false;
+  let hoursCap: number | null = null;
+  let hoursUsed = 0;
+  let hoursRequested = 0;
   if (rotationHoursGoal != null) {
-    const cap = rotationHoursGoal * 1.1;
-    const newRequestHours = validRows.reduce(
+    hoursCap = Math.round(rotationHoursGoal * 1.1 * 100) / 100;
+    hoursRequested = validRows.reduce(
       (sum: number, r: any) => sum + (Number(r.hours) || calcHours((r.start || "").toString(), (r.end || "").toString())),
       0
     );
@@ -168,24 +170,47 @@ export default async (req: Request, context: Context) => {
       const studentSessionsResp = await fetch(studentSessionsUrl, { headers: { Authorization: `Bearer ${token}` } });
       const studentSessionsData: any = await studentSessionsResp.json();
       if (studentSessionsResp.ok) {
-        const existingHours = ((studentSessionsData?.records || []) as any[])
+        hoursUsed = ((studentSessionsData?.records || []) as any[])
           .filter((r) => (r.fields?.["Rotation"] || []).includes(rotationRecordId) && r.fields?.["Approval Status"] !== "Denied")
           .reduce((sum, r) => sum + (Number(r.fields?.["Hours This Session"]) || 0), 0);
-        if (existingHours + newRequestHours > cap) {
-          const remaining = Math.max(0, Math.round((cap - existingHours) * 100) / 100);
-          return new Response(
-            JSON.stringify({
-              error: `This would put you over your scheduled hours for this rotation. You paid for ${rotationHoursGoal} hours (up to ${cap.toFixed(1)} with the 10% buffer); ${remaining} hour(s) are still available to schedule. Contact your coordinator if you need more hours approved.`,
-            }),
-            { status: 409 }
-          );
-        }
+        capExceeded = hoursUsed + hoursRequested > hoursCap;
       }
-      // If the check itself fails, fall through — we'd rather not block a
-      // legitimate request over a transient read error.
+      // If the check itself fails, fall through as not-exceeded — we'd
+      // rather not block a legitimate request over a transient read error.
     } catch {
       // Non-fatal — same reasoning as above.
     }
+  }
+
+  if (outOfRangeDates.length || capExceeded) {
+    const hoursRemaining = hoursCap != null ? Math.max(0, Math.round((hoursCap - hoursUsed) * 100) / 100) : null;
+    const parts: string[] = [];
+    if (outOfRangeDates.length) {
+      parts.push(
+        `${outOfRangeDates.map((d) => fmtDate(d)).join(", ")} ${outOfRangeDates.length === 1 ? "falls" : "fall"} outside your requested rotation timeframe (${fmtDate(rotationStart)} – ${fmtDate(rotationEnd)}).`
+      );
+    }
+    if (capExceeded) {
+      parts.push(
+        `This batch would put you over your scheduled hours for this rotation — you paid for ${rotationHoursGoal} hours (up to ${hoursCap} with the 10% buffer) and ${hoursRemaining} hour(s) are still available.`
+      );
+    }
+    parts.push("Remove or change the affected date(s) and resubmit.");
+    return new Response(
+      JSON.stringify({
+        error: parts.join(" "),
+        outOfRangeDates,
+        rotationStart,
+        rotationEnd,
+        capExceeded,
+        hoursGoal: rotationHoursGoal,
+        hoursCap,
+        hoursUsed,
+        hoursRequested,
+        hoursRemaining,
+      }),
+      { status: 422 }
+    );
   }
 
   // Reject if this student already has a session on any of the requested dates —

@@ -569,6 +569,8 @@
     </div>
     <div id="req-student-locked-note" style="display:none;font-size:11px;color:var(--text-muted);margin-bottom:12px;margin-top:-8px;">Your info below is pre-filled from your student profile. Need something corrected? Use "Update Info" or message your coordinator.</div>
 
+    <div id="req-error-banner" style="display:none;background:#fef2f2;border:1px solid #fca5a5;border-radius:8px;padding:12px 14px;margin-bottom:14px;font-size:12.5px;color:#991b1b;line-height:1.5;"></div>
+
     <div class="form-grid" style="margin-bottom:10px">
       <div class="form-group">
         <label>Student Name *</label>
@@ -592,6 +594,7 @@
       <div class="form-group">
         <label>Requested Date *</label>
         <input type="date" id="req-date" />
+        <div id="req-date-error" style="display:none;font-size:11px;color:#dc2626;margin-top:3px;">This date is outside your rotation window. <a href="javascript:void(0)" onclick="clearPrimaryDate()" style="color:#dc2626;text-decoration:underline;">Clear it</a></div>
       </div>
       <div class="form-group">
         <label>Arrival Time *</label>
@@ -2260,7 +2263,9 @@ function addRequestRow() {
   div.dataset.rowIndex = i;
   div.style = 'margin-bottom:10px;border-top:1px dashed var(--gray-100);padding-top:10px;';
   div.innerHTML = `
-    <div class="form-group"><label>Date *</label><input type="date" id="req-date-${i}" /></div>
+    <div class="form-group"><label>Date *</label><input type="date" id="req-date-${i}" />
+      <div id="req-date-error-${i}" style="display:none;font-size:11px;color:#dc2626;margin-top:3px;">This date is outside your rotation window.</div>
+    </div>
     <div class="form-group"><label>Arrival *</label><input type="time" id="req-start-${i}" value="08:00" /></div>
     <div class="form-group"><label>Departure *</label><input type="time" id="req-end-${i}" value="17:00" /></div>
     <div class="form-group"><label>Hours</label><input type="number" id="req-hours-${i}" step="0.5" /></div>
@@ -2276,6 +2281,74 @@ function removeRequestRow(i) {
 }
 function container_lookup(i) {
   return document.querySelector(`#req-rows-container [data-row-index="${i}"]`);
+}
+
+function clearPrimaryDate() {
+  document.getElementById('req-date').value = '';
+  const err = document.getElementById('req-date-error');
+  if (err) err.style.display = 'none';
+  document.getElementById('req-date').style.borderColor = '';
+}
+
+// Collects every {date-input-id, error-div-id, date} for the primary row
+// plus every "extra" date row currently in the form.
+function requestFormDateRows() {
+  const rows = [{ dateId: 'req-date', errorId: 'req-date-error' }];
+  document.querySelectorAll('#req-rows-container .row-extra').forEach(rowEl => {
+    const i = rowEl.dataset.rowIndex;
+    rows.push({ dateId: `req-date-${i}`, errorId: `req-date-error-${i}` });
+  });
+  return rows.map(r => ({ ...r, date: document.getElementById(r.dateId)?.value || '' }));
+}
+
+// Wipes any error styling/messages left over from a previous failed submit —
+// called at the start of every submit attempt so a resubmit is judged fresh.
+function clearRequestErrors() {
+  const banner = document.getElementById('req-error-banner');
+  if (banner) { banner.style.display = 'none'; banner.innerHTML = ''; }
+  requestFormDateRows().forEach(r => {
+    const input = document.getElementById(r.dateId);
+    const err = document.getElementById(r.errorId);
+    if (input) input.style.borderColor = '';
+    if (err) err.style.display = 'none';
+  });
+}
+
+// Renders the structured error session-request-submit.mts returns when a
+// batch falls outside the student's rotation window and/or would put them
+// over their paid hours. Highlights exactly the offending date row(s) so
+// the student can remove/change just those and resubmit — the rest of the
+// batch (and the form) is left untouched.
+function renderRequestError(data) {
+  const banner = document.getElementById('req-error-banner');
+  if (!banner) { alert(data?.error || 'Could not submit.'); return; }
+
+  const lines = [];
+  if (Array.isArray(data.outOfRangeDates) && data.outOfRangeDates.length) {
+    const windowText = data.rotationStart && data.rotationEnd
+      ? ` (your rotation runs ${formatDate(data.rotationStart)} – ${formatDate(data.rotationEnd)})`
+      : '';
+    lines.push(`<div><strong>Outside your rotation window${windowText}:</strong> ${data.outOfRangeDates.map(d => formatDate(d)).join(', ')}. Remove or change ${data.outOfRangeDates.length === 1 ? 'this date' : 'these dates'} below.</div>`);
+
+    const outOfRangeSet = new Set(data.outOfRangeDates);
+    requestFormDateRows().forEach(r => {
+      if (r.date && outOfRangeSet.has(r.date)) {
+        const input = document.getElementById(r.dateId);
+        const err = document.getElementById(r.errorId);
+        if (input) input.style.borderColor = '#dc2626';
+        if (err) err.style.display = 'block';
+      }
+    });
+  }
+  if (data.capExceeded) {
+    lines.push(`<div style="margin-top:${lines.length ? '8px' : '0'}"><strong>Over your scheduled hours:</strong> you paid for ${data.hoursGoal} hours (up to ${data.hoursCap} with the 10% buffer), ${data.hoursUsed} already scheduled, and this batch requests ${data.hoursRequested} more. Only ${data.hoursRemaining} hour(s) are available — remove one or more dates below until you're under that.</div>`);
+  }
+  if (!lines.length) {
+    lines.push(`<div>${data.error || 'Could not submit.'}</div>`);
+  }
+  banner.innerHTML = lines.join('');
+  banner.style.display = 'block';
+  banner.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
 }
 
 // ── SUBMIT REQUEST ────────────────────────────────────
@@ -2309,6 +2382,10 @@ async function submitRequest() {
   const validRows = rows.filter(r => r.date && r.start && r.end);
   if (validRows.length === 0) { alert('Please fill in at least one date, arrival time, and departure time.'); return; }
 
+  // Fresh evaluation on every attempt — a resubmit after fixing dates
+  // shouldn't still show yesterday's error highlighting.
+  clearRequestErrors();
+
   const override = capacityOverride;
   const today = new Date().toISOString().split('T')[0];
   let created = 0;
@@ -2317,6 +2394,10 @@ async function submitRequest() {
     // Students don't have the staff password airtable-write requires, so their
     // requests go through a separate public endpoint that always forces new
     // sessions to Pending server-side, regardless of any override state here.
+    // A 422 here means the batch is outside the rotation window and/or over
+    // the hours cap — render it inline so the student can fix just the
+    // offending date(s) and resubmit, instead of a blocking alert() that
+    // tells them nothing about which date is the problem.
     try {
       const resp = await fetch('/.netlify/functions/session-request-submit', {
         method: 'POST',
@@ -2324,11 +2405,15 @@ async function submitRequest() {
         body: JSON.stringify({ studentName: name, studentEmail: email, university: uni, totalHours: total, sessions: validRows })
       });
       const data = await resp.json();
-      if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
+      if (!resp.ok) {
+        renderRequestError(data);
+        return;
+      }
       created = data.created || 0;
     } catch (e) {
       console.error(e);
       alert('Could not submit: ' + e.message);
+      return;
     }
   } else {
     // If staff picked an existing student from the dropdown (rather than Manual
@@ -2407,6 +2492,7 @@ function clearRequestForm() {
   const rowsContainer = document.getElementById('req-rows-container');
   if (rowsContainer) rowsContainer.innerHTML = '';
   requestRowCount = 1;
+  clearRequestErrors();
 }
 
 // ── REQUEST MODAL: staff vs. student entry points ─────
