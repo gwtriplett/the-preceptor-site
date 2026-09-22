@@ -808,6 +808,8 @@
       <div class="portal-tab" onclick="setPortalTab('contact', this)">Update Info</div>
       <div class="portal-tab" onclick="setPortalTab('message', this)">Message Coordinator</div>
       <div class="portal-tab" onclick="setPortalTab('availability', this)">My Availability</div>
+      <div class="portal-tab" onclick="setPortalTab('policies', this)">Scheduling Policies</div>
+      <div class="portal-tab" onclick="setPortalTab('newrotation', this)">Request New Rotation</div>
     </div>
 
     <!-- TAB: SESSIONS -->
@@ -989,6 +991,74 @@
         </div>
         <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="submitUnavailability()">Submit</button>
         <div id="unavail-sent-msg" class="msg-sent">✓ Thanks — your coordinator has been notified.</div>
+      </div>
+    </div>
+
+    <!-- TAB: SCHEDULING POLICIES -->
+    <div id="ptab-policies" style="display:none">
+      <div class="card">
+        <div class="section-head" style="margin-bottom:14px">
+          <span class="section-title">Scheduling policies</span>
+        </div>
+        <div style="border:1px dashed var(--gray-100);border-radius:8px;padding:16px;background:var(--gray-50);color:var(--text-muted);font-size:13px;line-height:1.6">
+          <strong style="display:block;margin-bottom:8px;color:var(--text-body)">Coordinator: replace this placeholder with your written scheduling policy.</strong>
+          This is where students will read the real rules for requesting and changing clinical hour dates — e.g. how far in advance a session must be requested, how to request a change or cancellation, blackout dates, and what happens if hours fall behind pace. Send the text to your coordinator (or paste it directly into this tab) and it will replace this notice.
+        </div>
+      </div>
+    </div>
+
+    <!-- TAB: REQUEST NEW ROTATION -->
+    <div id="ptab-newrotation" style="display:none">
+      <div class="card">
+        <div class="section-head" style="margin-bottom:14px">
+          <span class="section-title">Request a new clinical rotation period</span>
+        </div>
+        <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
+          Starting a new semester, course, or additional clinical period? Fill this out and your coordinator will review it. This does not log individual hours — use "My Sessions" for that once your rotation is approved.
+        </p>
+        <div class="form-group">
+          <label>Course name <span style="color:var(--red)">*</span></label>
+          <input type="text" id="nr-course" placeholder="e.g. NUR676L Primary Care Synthesis Practicum" />
+        </div>
+        <div class="update-field-row">
+          <div class="form-group" style="margin:0">
+            <label>Semester / Quarter <span style="color:var(--red)">*</span></label>
+            <select id="nr-semester">
+              <option value="">Select...</option>
+              <option>2026 - Winter</option>
+              <option>2026 - Summer</option>
+              <option>2026 - Fall</option>
+              <option>2027 - Winter</option>
+              <option>2027 - Spring</option>
+              <option>2027 - Summer</option>
+              <option>2027 - Fall</option>
+            </select>
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Hours goal for this rotation</label>
+            <input type="number" id="nr-hours" placeholder="e.g. 180" min="0" />
+          </div>
+        </div>
+        <div class="update-field-row">
+          <div class="form-group" style="margin:0">
+            <label>Requested start date <span style="color:var(--red)">*</span></label>
+            <input type="date" id="nr-start" />
+          </div>
+          <div class="form-group" style="margin:0">
+            <label>Requested end date <span style="color:var(--red)">*</span></label>
+            <input type="date" id="nr-end" />
+          </div>
+        </div>
+        <div class="form-group" style="margin-top:10px">
+          <label>Clinical focus / objectives (optional)</label>
+          <input type="text" id="nr-focus" placeholder="e.g. Women's Health, Primary Care" />
+        </div>
+        <div class="form-group" style="margin-top:10px">
+          <label>Special notes (optional)</label>
+          <input type="text" id="nr-notes" placeholder="Anything your coordinator should know" />
+        </div>
+        <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="submitNewRotationRequest()">Submit request</button>
+        <div id="nr-sent-msg" class="msg-sent">✓ Request submitted — your coordinator will review it soon.</div>
       </div>
     </div>
 
@@ -2533,7 +2603,7 @@ async function lookupStudent() {
 function setPortalTab(tab, el) {
   document.querySelectorAll('.portal-tab').forEach(t => t.classList.remove('active'));
   if (el) el.classList.add('active');
-  ['sessions','docs','objectives','contact','message','availability'].forEach(t => {
+  ['sessions','docs','objectives','contact','message','availability','policies','newrotation'].forEach(t => {
     const el = document.getElementById('ptab-' + t);
     if (el) el.style.display = t === tab ? 'block' : 'none';
   });
@@ -2638,6 +2708,68 @@ async function submitUnavailability() {
 ${start}${end && end !== start ? ' through ' + end : ''}${reason ? '\nReason: ' + reason : ''}
 
 This is also saved in your Student Unavailability table in Airtable.`
+      );
+    }
+  } catch (e) {
+    alert('Could not submit: ' + e.message);
+  }
+}
+
+async function submitNewRotationRequest() {
+  const course = document.getElementById('nr-course').value.trim();
+  const semester = document.getElementById('nr-semester').value;
+  const hours = document.getElementById('nr-hours').value;
+  const start = document.getElementById('nr-start').value;
+  const end = document.getElementById('nr-end').value;
+  const focus = document.getElementById('nr-focus').value.trim();
+  const notes = document.getElementById('nr-notes').value.trim();
+
+  if (!course) { alert('Please enter the course name.'); return; }
+  if (!semester) { alert('Please select a semester / quarter.'); return; }
+  if (!start || !end) { alert('Please enter both a requested start and end date.'); return; }
+
+  try {
+    const resp = await fetch('/.netlify/functions/rotation-request-submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studentRecordId: window._studentPortalRecordId,
+        studentEmail: window._studentPortalEmail,
+        courseName: course,
+        semesterQuarter: semester,
+        university: window._studentPortalUniversity || '',
+        hoursGoal: hours,
+        startDate: start,
+        endDate: end,
+        clinicalFocus: focus,
+        specialNotes: notes
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || 'Could not submit.');
+
+    document.getElementById('nr-course').value = '';
+    document.getElementById('nr-semester').value = '';
+    document.getElementById('nr-hours').value = '';
+    document.getElementById('nr-start').value = '';
+    document.getElementById('nr-end').value = '';
+    document.getElementById('nr-focus').value = '';
+    document.getElementById('nr-notes').value = '';
+    const msg = document.getElementById('nr-sent-msg');
+    msg.style.display = 'block';
+    setTimeout(() => msg.style.display = 'none', 4000);
+
+    const cfg = getEmailConfig();
+    if (hasValidCoordinatorEmail(cfg)) {
+      sendEmailViaClaudeAPI(cfg.fromEmail,
+        `New rotation request — ${window._studentPortalName}`,
+        `${window._studentPortalName} requested a new clinical rotation period:
+
+Course: ${course}
+Semester / Quarter: ${semester}
+Requested dates: ${start} through ${end}${hours ? '\nHours goal: ' + hours : ''}${focus ? '\nClinical focus: ' + focus : ''}${notes ? '\nNotes: ' + notes : ''}
+
+This has been added to the Rotations table in Airtable with Pipeline Status "Inquiry Received" for your review.`
       );
     }
   } catch (e) {
