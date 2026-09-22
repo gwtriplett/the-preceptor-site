@@ -808,6 +808,7 @@
       <div class="portal-tab" onclick="setPortalTab('contact', this)">Update Info</div>
       <div class="portal-tab" onclick="setPortalTab('message', this)">Message Coordinator</div>
       <div class="portal-tab" onclick="setPortalTab('availability', this)">My Availability</div>
+      <div class="portal-tab" onclick="setPortalTab('rotations', this)">Clinical Rotations</div>
       <div class="portal-tab" onclick="setPortalTab('policies', this)">Scheduling Policies</div>
       <div class="portal-tab" onclick="setPortalTab('newrotation', this)">Request New Rotation</div>
     </div>
@@ -994,15 +995,29 @@
       </div>
     </div>
 
+    <!-- TAB: CLINICAL ROTATIONS -->
+    <div id="ptab-rotations" style="display:none">
+      <div class="section-head" style="margin-bottom:14px">
+        <span class="section-title">Your clinical rotation history</span>
+      </div>
+      <div id="rotations-list">
+        <div class="empty" style="padding:20px;text-align:center;color:var(--text-muted)">Loading...</div>
+      </div>
+    </div>
+
     <!-- TAB: SCHEDULING POLICIES -->
     <div id="ptab-policies" style="display:none">
       <div class="card">
         <div class="section-head" style="margin-bottom:14px">
           <span class="section-title">Scheduling policies</span>
         </div>
-        <div style="border:1px dashed var(--gray-100);border-radius:8px;padding:16px;background:var(--gray-50);color:var(--text-muted);font-size:13px;line-height:1.6">
-          <strong style="display:block;margin-bottom:8px;color:var(--text-body)">Coordinator: replace this placeholder with your written scheduling policy.</strong>
-          This is where students will read the real rules for requesting and changing clinical hour dates — e.g. how far in advance a session must be requested, how to request a change or cancellation, blackout dates, and what happens if hours fall behind pace. Send the text to your coordinator (or paste it directly into this tab) and it will replace this notice.
+        <div style="border:1px solid var(--gray-100);border-radius:8px;padding:20px;background:var(--gray-50);text-align:center">
+          <div style="font-size:15px;font-weight:600;color:var(--text-body);margin-bottom:8px">Coming Soon</div>
+          <div style="font-size:13px;color:var(--text-muted);line-height:1.6">
+            Written scheduling policies aren't posted here yet. In the meantime, please contact your preceptorship coordinator at
+            <a href="mailto:coordinator@thepreceptorsite.com" style="color:var(--blue-dark)">coordinator@thepreceptorsite.com</a>
+            for scheduling information.
+          </div>
         </div>
       </div>
     </div>
@@ -1534,6 +1549,7 @@ let studentDirectory = [];
 let requestRowCount = 1;
 const STUDENTS_BASE_ID = 'appf6D9Nbhb5Wg43L';
 const STUDENTS_TABLE_ID = 'tblesg1u5m2ec3cgg';
+const ROTATIONS_TABLE_ID = 'tbl6l75OeBLNzSp0i';
 
 /* ============================================================
    AIRTABLE ACCESS — via secure serverless functions
@@ -2439,6 +2455,86 @@ function calcHours(start, end) {
   return Math.round(((eh * 60 + em) - (sh * 60 + sm)) / 60 * 2) / 2;
 }
 
+// Fetches every Rotation linked to this student once (used for both the
+// portal header's "current rotation" and the full Clinical Rotations tab),
+// newest requested start date first.
+async function loadStudentRotations(studentRecord) {
+  const rotationIds = studentRecord['Rotations'] || [];
+  if (!rotationIds.length) return [];
+  try {
+    const formula = `OR(${rotationIds.map(id => `RECORD_ID()="${id}"`).join(',')})`;
+    const data = await atRead(STUDENTS_BASE_ID, ROTATIONS_TABLE_ID, `?filterByFormula=${encodeURIComponent(formula)}`);
+    const rotations = data ? (data.records || []).map(r => ({ id: r.id, createdTime: r.createdTime, ...r.fields })) : [];
+    rotations.sort((a, b) => (b['Requested Start Date'] || '').localeCompare(a['Requested Start Date'] || ''));
+    return rotations;
+  } catch (e) {
+    console.error('Could not load rotations', e);
+    return [];
+  }
+}
+
+// Picks which of the student's rotations is "current" for the portal header:
+// prefer one whose requested dates span today, then Active Rotation status,
+// then whichever is most recently created.
+function pickCurrentRotation(rotations) {
+  if (!rotations.length) return null;
+  const today = new Date(); today.setHours(0, 0, 0, 0);
+  const inRange = (r) => {
+    const start = r['Requested Start Date'], end = r['Requested End Date'];
+    if (!start || !end) return false;
+    const s = new Date(start + 'T00:00:00'), e = new Date(end + 'T23:59:59');
+    return today >= s && today <= e;
+  };
+  const statusRank = (r) => {
+    const s = r['Pipeline Status'] || '';
+    if (s.includes('Active Rotation')) return 0;
+    if (s.includes('Completed')) return 2;
+    return 1;
+  };
+  const sorted = [...rotations].sort((a, b) => {
+    const byRange = (inRange(b) ? 1 : 0) - (inRange(a) ? 1 : 0);
+    if (byRange !== 0) return byRange;
+    const byStatus = statusRank(a) - statusRank(b);
+    if (byStatus !== 0) return byStatus;
+    return (b.createdTime || '').localeCompare(a.createdTime || '');
+  });
+  return sorted[0];
+}
+
+function renderRotationsTab(rotations) {
+  const list = document.getElementById('rotations-list');
+  if (!list) return;
+  if (!rotations.length) {
+    list.innerHTML = '<div class="empty" style="padding:20px;text-align:center;color:var(--text-muted)">No rotation history on file yet.</div>';
+    return;
+  }
+  list.innerHTML = rotations.map(r => {
+    const course = r['Course Name'] || 'Course not on file';
+    const semester = r['Semester / Quarter'] || '—';
+    const start = r['Requested Start Date'] ? formatDate(r['Requested Start Date']) : '—';
+    const end = r['Requested End Date'] ? formatDate(r['Requested End Date']) : '—';
+    const goal = r['Hours Goal'] != null ? r['Hours Goal'] : '—';
+    const done = r['Total Hours'] != null ? r['Total Hours'] : 0;
+    const status = r['Pipeline Status'] || '—';
+    const focus = r['Clinical Focus / Objectives'] || '';
+    return `
+      <div class="card" style="margin-bottom:12px">
+        <div class="section-head" style="margin-bottom:8px">
+          <span class="section-title" style="font-size:14px">${course}</span>
+          <span style="font-size:12px;color:var(--text-muted)">${semester}</span>
+        </div>
+        <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:10px;font-size:13px">
+          <div><div style="color:var(--text-muted);font-size:11px">Start date</div>${start}</div>
+          <div><div style="color:var(--text-muted);font-size:11px">End date</div>${end}</div>
+          <div><div style="color:var(--text-muted);font-size:11px">Hours goal</div>${goal}</div>
+          <div><div style="color:var(--text-muted);font-size:11px">Hours logged</div>${done}</div>
+          <div><div style="color:var(--text-muted);font-size:11px">Status</div>${status}</div>
+        </div>
+        ${focus ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)"><strong style="color:var(--text-body)">Focus:</strong> ${focus}</div>` : ''}
+      </div>`;
+  }).join('');
+}
+
 // ── STUDENT PORTAL LOOKUP ────────────────────────────
 async function lookupStudent() {
   const val = document.getElementById('student-email-lookup').value.trim();
@@ -2523,7 +2619,21 @@ async function lookupStudent() {
   const pct = totalReq ? Math.min(100, Math.round(totalDone / totalReq * 100)) : 0;
   const studentName = studentRecord['Student Name'] || val;
   document.getElementById('s-name').textContent = studentName;
-  document.getElementById('s-meta').textContent = `${studentRecord['University / College'] || 'University not set'} · ${totalReq} hours required`;
+  const studentIdLabel = studentRecord['Student ID'] ? `ID ${studentRecord['Student ID']}` : 'ID not on file';
+  document.getElementById('s-meta').textContent = `${studentIdLabel} · Loading current rotation... · ${studentRecord['University / College'] || 'University not set'} · ${totalReq} hours required`;
+  loadStudentRotations(studentRecord).then(rotations => {
+    window._studentPortalRotations = rotations;
+    const rotation = pickCurrentRotation(rotations);
+    let courseLabel = 'No current rotation on file';
+    if (rotation && rotation['Course Name']) {
+      const start = rotation['Requested Start Date'] ? formatDate(rotation['Requested Start Date']) : null;
+      const end = rotation['Requested End Date'] ? formatDate(rotation['Requested End Date']) : null;
+      const dateRange = (start && end) ? ` (${start} – ${end})` : '';
+      courseLabel = `Current course: ${rotation['Course Name']}${dateRange}`;
+    }
+    document.getElementById('s-meta').textContent = `${studentIdLabel} · ${courseLabel} · ${studentRecord['University / College'] || 'University not set'} · ${totalReq} hours required`;
+    renderRotationsTab(rotations);
+  });
   document.getElementById('s-hours-done').textContent = totalDone.toFixed(1);
   document.getElementById('s-hours-left').textContent = Math.max(0, totalReq - totalDone).toFixed(1);
   document.getElementById('s-progress-bar').style.width = pct + '%';
@@ -2603,7 +2713,7 @@ async function lookupStudent() {
 function setPortalTab(tab, el) {
   document.querySelectorAll('.portal-tab').forEach(t => t.classList.remove('active'));
   if (el) el.classList.add('active');
-  ['sessions','docs','objectives','contact','message','availability','policies','newrotation'].forEach(t => {
+  ['sessions','docs','objectives','contact','message','availability','rotations','policies','newrotation'].forEach(t => {
     const el = document.getElementById('ptab-' + t);
     if (el) el.style.display = t === tab ? 'block' : 'none';
   });
