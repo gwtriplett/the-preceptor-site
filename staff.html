@@ -142,25 +142,68 @@ document.getElementById('pwInput').addEventListener('keydown', e=>{ if(e.key ===
 
 const STUDENTS_BASE_ID = 'appf6D9Nbhb5Wg43L';
 const STUDENTS_TABLE_ID = 'tblesg1u5m2ec3cgg';
+const ROTATIONS_TABLE_ID = 'tbl6l75OeBLNzSp0i';
 
+// Each entry is a Rotation (one per intake submission). Its `fields` are the
+// Rotation's fields merged over the linked Student's, so the card and email
+// draft can read everything from one place. `id` is always the Rotation's id.
 let currentRecords = [];
+
+async function airtableRead(table, path){
+  const resp = await fetch('/.netlify/functions/airtable-read', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ base: STUDENTS_BASE_ID, table, path })
+  });
+  const data = await resp.json();
+  if(!resp.ok){ throw new Error(data?.error?.message || data?.error || `Server error (${resp.status})`); }
+  return data;
+}
 
 async function loadSubmissions(){
   const list = document.getElementById('list');
   list.innerHTML = '<div class="empty">Loading…</div>';
 
   const formula = encodeURIComponent(`OR({Pipeline Status}="🟡 Inquiry Received", {Admission Status}="Application Received")`);
-  const path = `?filterByFormula=${formula}&sort%5B0%5D%5Bfield%5D=Intake%20Timestamp&sort%5B0%5D%5Bdirection%5D=desc`;
 
   try{
-    const resp = await fetch('/.netlify/functions/airtable-read', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ base: STUDENTS_BASE_ID, table: STUDENTS_TABLE_ID, path })
-    });
-    const data = await resp.json();
-    if(!resp.ok){ throw new Error(data?.error || `Server error (${resp.status})`); }
-    currentRecords = data.records || [];
+    const rotData = await airtableRead(ROTATIONS_TABLE_ID, `?filterByFormula=${formula}`);
+    const rotations = rotData.records || [];
+
+    // Pull the linked Students in one request for name / contact details.
+    const studentIds = [...new Set(rotations.map(r => (r.fields['Student'] || [])[0]).filter(Boolean))];
+    const studentsById = {};
+    if(studentIds.length){
+      const idFormula = encodeURIComponent(`OR(${studentIds.map(id => `RECORD_ID()="${id}"`).join(',')})`);
+      const stuData = await airtableRead(STUDENTS_TABLE_ID, `?filterByFormula=${idFormula}`);
+      (stuData.records || []).forEach(st => { studentsById[st.id] = st; });
+    }
+
+    currentRecords = rotations
+      .map(rot => {
+        const student = studentsById[(rot.fields['Student'] || [])[0]];
+        const sf = student ? student.fields : {};
+        const rf = rot.fields;
+        return {
+          id: rot.id,
+          createdTime: rot.createdTime,
+          fields: {
+            ...sf,
+            'First Name': sf['First Name'] || (rf['Placement Label'] || '').split(', ')[1] || '',
+            'Last Name': sf['Last Name'] || (rf['Placement Label'] || '').split(', ')[0] || '',
+            'University / College': rf['College/University'] || sf['University / College'],
+            'Requested Start Date': rf['Requested Start Date'],
+            'Requested End Date': rf['Requested End Date'],
+            'Total Hours Required': rf['Hours Goal'],
+            'Course Name': rf['Course Name'],
+            'Semester / Quarter': rf['Semester / Quarter'],
+            'Admission Status': rf['Admission Status'],
+            'Pipeline Status': rf['Pipeline Status'],
+            'Intake Timestamp': rot.createdTime,
+          }
+        };
+      })
+      .sort((a, b) => new Date(b.createdTime) - new Date(a.createdTime));
     renderList();
   } catch(err){
     list.innerHTML = `<div class="empty">${err.message}</div>`;
@@ -192,6 +235,8 @@ function cardHtml(rec){
         <div><span>Email</span>${f['Email']||'—'}</div>
         <div><span>Phone</span>${f['Phone Number']||'—'}</div>
         <div><span>Student ID</span>${f['Student ID']||'—'}</div>
+        <div><span>Course</span>${f['Course Name']||'—'}</div>
+        <div><span>Semester</span>${f['Semester / Quarter']||'—'}</div>
         <div><span>Rotation dates</span>${f['Requested Start Date']||'?'} – ${f['Requested End Date']||'?'}</div>
         <div><span>Hours requested</span>${f['Total Hours Required']||'—'}</div>
         <div><span>Submitted</span>${f['Intake Timestamp'] ? new Date(f['Intake Timestamp']).toLocaleString() : '—'}</div>
@@ -292,7 +337,7 @@ async function markContacted(id){
       body: JSON.stringify({
         staffPassword: staffPasswordEntered,
         base: STUDENTS_BASE_ID,
-        table: STUDENTS_TABLE_ID,
+        table: ROTATIONS_TABLE_ID,
         method: 'PATCH',
         body: { records: [{ id, fields: { "Admission Status": ["Under Review"] } }], typecast: true }
       })
