@@ -1176,6 +1176,26 @@
   </div>
 </div>
 
+<!-- ROTATION SESSIONS MODAL — on-screen view of one rotation's session dates
+     (student and staff both open this; it's the same data as the PDF). -->
+<div id="rotation-sessions-modal" style="display:none;position:fixed;inset:0;background:rgba(0,0,0,0.45);z-index:2000;overflow-y:auto;padding:30px 20px;">
+  <div style="max-width:640px;margin:0 auto;background:var(--white);border-radius:12px;overflow:hidden;box-shadow:0 8px 40px rgba(0,0,0,0.18);">
+    <div style="background:var(--tps-grad);padding:16px 24px;display:flex;align-items:center;justify-content:space-between;">
+      <div>
+        <div id="rsm-title" style="font-size:17px;font-weight:700;color:#fff;"></div>
+        <div id="rsm-sub" style="font-size:12px;color:rgba(255,255,255,0.8);margin-top:2px;"></div>
+      </div>
+      <button onclick="closeRotationSessionsModal()" style="background:rgba(255,255,255,0.2);border:none;color:white;border-radius:8px;padding:6px 12px;cursor:pointer;font-size:14px;">✕ Close</button>
+    </div>
+    <div style="padding:16px 24px;max-height:65vh;overflow-y:auto;">
+      <div id="rsm-list"></div>
+    </div>
+    <div style="padding:12px 24px;border-top:1px solid var(--gray-100);display:flex;justify-content:flex-end;">
+      <a id="rsm-download-link" href="#" target="_blank" class="btn btn-teal btn-sm" style="text-decoration:none;">⬇ Download PDF</a>
+    </div>
+  </div>
+</div>
+
 <!-- ════════════════════════════════ PLANNING PAGE ════════════════════════════════ -->
 <div id="page-planning" class="page">
   <div class="section-head" style="margin-bottom:20px">
@@ -2697,6 +2717,80 @@ function pickCurrentRotation(rotations) {
   return sorted[0];
 }
 
+// Opens an on-screen view of one rotation's session dates — same
+// underlying data as the PDF download, but viewable without leaving the
+// page. Used by both the student portal's Clinical Rotations tab and the
+// staff student-detail modal.
+async function viewRotationSessions(rotationId) {
+  const modal = document.getElementById('rotation-sessions-modal');
+  const titleEl = document.getElementById('rsm-title');
+  const subEl = document.getElementById('rsm-sub');
+  const list = document.getElementById('rsm-list');
+  const downloadLink = document.getElementById('rsm-download-link');
+  if (!modal || !list) return;
+
+  titleEl.textContent = 'Loading…';
+  subEl.textContent = '';
+  list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">Loading…</div>';
+  downloadLink.href = `/.netlify/functions/rotation-sessions-pdf?rotationId=${rotationId}`;
+  modal.style.display = 'block';
+  document.body.style.overflow = 'hidden';
+
+  try {
+    const rotData = await atRead(STUDENTS_BASE_ID, ROTATIONS_TABLE_ID, `/${rotationId}`);
+    if (!rotData) throw new Error('Could not load this rotation.');
+    const rf = rotData.fields || {};
+    titleEl.textContent = rf['Course Name'] || 'Clinical Rotation';
+    const start = rf['Requested Start Date'] ? formatDate(rf['Requested Start Date']) : '?';
+    const end = rf['Requested End Date'] ? formatDate(rf['Requested End Date']) : '?';
+    const goal = typeof rf['Hours Goal'] === 'number' ? ` · ${rf['Hours Goal']} hrs goal` : '';
+    subEl.textContent = `${rf['Semester / Quarter'] || ''} · ${start} – ${end}${goal}`;
+
+    const sessionIds = rf['Sessions'] || [];
+    if (!sessionIds.length) {
+      list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">No sessions on file for this rotation.</div>';
+      return;
+    }
+    const formula = `OR(${sessionIds.map(id => `RECORD_ID()="${id}"`).join(',')})`;
+    const sessData = await atRead(STUDENTS_BASE_ID, TABLE_ID, `?filterByFormula=${encodeURIComponent(formula)}`);
+    const sessions = sessData ? (sessData.records || []).map(r => ({ id: r.id, ...r.fields })) : [];
+    sessions.sort((a, b) => (a['Session Date'] || '').localeCompare(b['Session Date'] || '') || (a['Start Time'] || '').localeCompare(b['Start Time'] || ''));
+
+    if (!sessions.length) {
+      list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">No sessions on file for this rotation.</div>';
+      return;
+    }
+    const badgeClassFor = { Pending: 'badge-pending', Approved: 'badge-approved', Denied: 'badge-denied', Completed: 'badge-completed', 'No Show': 'badge-noshow' };
+    list.innerHTML = sessions.map(s => {
+      const badgeClass = badgeClassFor[s['Approval Status']] || 'badge-pending';
+      return `
+        <div style="border:1px solid var(--gray-100);border-radius:8px;padding:10px 14px;margin-bottom:8px;">
+          <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
+            <div style="font-weight:600;font-size:13px">${formatDate(s['Session Date'])}</div>
+            <span class="badge ${badgeClass}">${escapeHtml(s['Approval Status'] || 'Pending')}</span>
+          </div>
+          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${escapeHtml(s['Start Time'] || '?')} – ${escapeHtml(s['End Time'] || '?')} · ${s['Hours This Session'] ?? '?'} hrs</div>
+          ${s['Clinical Focus'] ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${escapeHtml(s['Clinical Focus'])}</div>` : ''}
+          ${s['Hours Signed Off'] ? `<div style="font-size:11px;color:var(--teal);margin-top:4px">✓ ${s['Hours Signed Off']} hrs signed off${s['Signed Off By'] ? ' by ' + escapeHtml(s['Signed Off By']) : ''}</div>` : ''}
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = `<div style="padding:20px;text-align:center;color:var(--red)">Could not load sessions${e && e.message ? ': ' + escapeHtml(e.message) : '.'}</div>`;
+  }
+}
+
+function closeRotationSessionsModal() {
+  const modal = document.getElementById('rotation-sessions-modal');
+  if (modal) modal.style.display = 'none';
+  // Staff open this from inside the student-detail modal — if that's still
+  // open underneath, leave the body scroll-locked rather than releasing it
+  // out from under a modal that's still showing.
+  const staffModal = document.getElementById('student-detail-modal');
+  if (!staffModal || staffModal.style.display === 'none') {
+    document.body.style.overflow = '';
+  }
+}
+
 function renderRotationsTab(rotations) {
   const list = document.getElementById('rotations-list');
   if (!list) return;
@@ -2727,8 +2821,9 @@ function renderRotationsTab(rotations) {
           <div><div style="color:var(--text-muted);font-size:11px">Status</div>${status}</div>
         </div>
         ${focus ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)"><strong style="color:var(--text-body)">Focus:</strong> ${focus}</div>` : ''}
-        <div style="margin-top:10px">
-          <a href="/.netlify/functions/rotation-sessions-pdf?rotationId=${r.id}" target="_blank" class="btn btn-teal btn-sm" style="text-decoration:none;display:inline-block;">⬇ Download session dates (PDF)</a>
+        <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
+          <button type="button" class="btn btn-primary btn-sm" onclick="viewRotationSessions('${r.id}')">👁 View session dates</button>
+          <a href="/.netlify/functions/rotation-sessions-pdf?rotationId=${r.id}" target="_blank" class="btn btn-teal btn-sm" style="text-decoration:none;display:inline-block;">⬇ Download PDF</a>
         </div>
       </div>`;
   }).join('');
@@ -4132,7 +4227,10 @@ async function loadSdmRotations(student) {
             <div style="font-weight:600;color:var(--text)">${r['Course Name'] || 'Rotation'}</div>
             <div style="color:var(--text-muted);font-size:11.5px;">${r['Semester / Quarter'] || ''} · ${start} – ${end} · ${r['Pipeline Status'] || ''}</div>
           </div>
-          <a href="/.netlify/functions/rotation-sessions-pdf?rotationId=${r.id}" target="_blank" class="btn btn-teal btn-sm" style="text-decoration:none;">⬇ Download PDF</a>
+          <div style="display:flex;gap:6px;flex-wrap:wrap;">
+            <button type="button" class="btn btn-primary btn-sm" onclick="viewRotationSessions('${r.id}')">👁 View</button>
+            <a href="/.netlify/functions/rotation-sessions-pdf?rotationId=${r.id}" target="_blank" class="btn btn-teal btn-sm" style="text-decoration:none;">⬇ Download PDF</a>
+          </div>
         </div>`;
     }).join('');
   } catch (e) {
