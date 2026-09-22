@@ -145,6 +145,8 @@ export default async (req: Request, context: Context) => {
     // Every submission — new student or returning — gets its own Rotation record,
     // which is where course, hours, dates, and status for THIS placement live.
     const rotationFields: Record<string, any> = {
+      // Name only (no dates) so all of a student's rotations sort/group together.
+      "Placement Label": studentName,
       "Student": studentRecordId ? [studentRecordId] : undefined,
       "Semester / Quarter": semesterQuarter,
       "College/University": (input.university || "").toString().trim(),
