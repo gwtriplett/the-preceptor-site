@@ -4,14 +4,38 @@ const SESSIONS_BASE_ID = "appf6D9Nbhb5Wg43L";
 const SESSIONS_TABLE_ID = "tblBC5TiAa8VEII9d";
 const STUDENTS_BASE_ID = "appf6D9Nbhb5Wg43L";
 const STUDENTS_TABLE_ID = "tblesg1u5m2ec3cgg";
+const ROTATIONS_TABLE_ID = "tbl6l75OeBLNzSp0i";
 
-// A student can have multiple Students records (one per semester/quarter). When
-// several match the same email, prefer whichever enrollment is actually current.
-function statusRank(pipelineStatus: string): number {
-  const s = pipelineStatus || "";
-  if (s.includes("Active Rotation")) return 0;
-  if (s.includes("Enrollment Completed")) return 1;
-  return 2;
+// Picks which of a student's Rotations a new session request belongs to —
+// the same rule the student portal uses to choose which rotation to show in
+// its header: prefer one whose requested dates span today, then an Active
+// Rotation status, then whichever Rotation is most recently created.
+function pickCurrentRotation(rotations: any[]): any | null {
+  if (!rotations.length) return null;
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+  const inRange = (r: any) => {
+    const start = r.fields?.["Requested Start Date"];
+    const end = r.fields?.["Requested End Date"];
+    if (!start || !end) return false;
+    const s = new Date(start + "T00:00:00");
+    const e = new Date(end + "T23:59:59");
+    return today >= s && today <= e;
+  };
+  const statusRank = (r: any) => {
+    const s = r.fields?.["Pipeline Status"] || "";
+    if (s.includes("Active Rotation")) return 0;
+    if (s.includes("Completed")) return 2;
+    return 1;
+  };
+  const sorted = [...rotations].sort((a, b) => {
+    const byRange = (inRange(b) ? 1 : 0) - (inRange(a) ? 1 : 0);
+    if (byRange !== 0) return byRange;
+    const byStatus = statusRank(a) - statusRank(b);
+    if (byStatus !== 0) return byStatus;
+    return (b.createdTime || "").localeCompare(a.createdTime || "");
+  });
+  return sorted[0];
 }
 
 function calcHours(start: string, end: string): number {
@@ -61,25 +85,48 @@ export default async (req: Request, context: Context) => {
     return new Response(JSON.stringify({ error: "Server is missing AIRTABLE_TOKEN. Set it in Netlify Site settings > Environment variables." }), { status: 500 });
   }
 
-  // Resolve the specific Students enrollment record for this email (best-effort —
-  // if this fails or finds nothing, sessions still get created, just without the
-  // link; lookupStudent() falls back to matching by email in that case).
+  // Resolve the Student record for this email, then the Rotation (within
+  // that student's linked Rotations) this request belongs to. Students no
+  // longer repeats per semester — one Student record covers every term, and
+  // term-specific status/hours/dates live on Rotations — so lookup is by
+  // email first, Rotation second. Best-effort: if this fails or finds
+  // nothing, sessions still get created, just without the link(s);
+  // lookupStudent() on the portal falls back to matching by email.
   let studentRecordId: string | null = null;
+  let rotationRecordId: string | null = null;
+  let rotationHoursGoal: number | null = null;
   try {
     const lookupUrl = `https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${STUDENTS_TABLE_ID}?filterByFormula=${encodeURIComponent(`LOWER({Email})="${studentEmail.toLowerCase()}"`)}`;
     const lookupResp = await fetch(lookupUrl, { headers: { Authorization: `Bearer ${token}` } });
     const lookupData: any = await lookupResp.json();
     if (lookupResp.ok) {
       const candidates = (lookupData?.records || []) as any[];
-      candidates.sort((a, b) => {
-        const byStatus = statusRank(a.fields?.["Pipeline Status"]) - statusRank(b.fields?.["Pipeline Status"]);
-        if (byStatus !== 0) return byStatus;
-        return (b.createdTime || "").localeCompare(a.createdTime || "");
-      });
-      if (candidates.length) studentRecordId = candidates[0].id;
+      // Legacy safety: if more than one Students row somehow matches this
+      // email, prefer whichever was created most recently.
+      candidates.sort((a, b) => (b.createdTime || "").localeCompare(a.createdTime || ""));
+      const student = candidates[0];
+      if (student) {
+        studentRecordId = student.id;
+        const rotationIds: string[] = student.fields?.["Rotations"] || [];
+        if (rotationIds.length) {
+          const rotFormula = `OR(${rotationIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
+          const rotUrl = `https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${ROTATIONS_TABLE_ID}?filterByFormula=${encodeURIComponent(rotFormula)}`;
+          const rotResp = await fetch(rotUrl, { headers: { Authorization: `Bearer ${token}` } });
+          const rotData: any = await rotResp.json();
+          if (rotResp.ok) {
+            const rotation = pickCurrentRotation(rotData?.records || []);
+            if (rotation) {
+              rotationRecordId = rotation.id;
+              if (typeof rotation.fields?.["Hours Goal"] === "number") {
+                rotationHoursGoal = rotation.fields["Hours Goal"];
+              }
+            }
+          }
+        }
+      }
     }
   } catch {
-    // Non-fatal — proceed without the link.
+    // Non-fatal — proceed without the link(s).
   }
 
   // Reject if this student already has a session on any of the requested dates —
@@ -104,6 +151,11 @@ export default async (req: Request, context: Context) => {
     // Non-fatal — if the duplicate check itself fails, fall through and allow submission.
   }
 
+  // The Rotation's own Hours Goal is the authoritative total when we found
+  // one — falls back to the client-supplied value only if no Rotation matched
+  // (e.g. a student without any Rotation on file yet).
+  const effectiveTotalHours = rotationHoursGoal != null ? rotationHoursGoal : totalHours;
+
   // Strict allowlist, same spirit as intake-submit.mts — this is a public endpoint,
   // so status/approval fields are always forced server-side and never trusted from the client.
   const records = validRows.map((r: any) => {
@@ -123,9 +175,10 @@ export default async (req: Request, context: Context) => {
         "Hours This Session": hrs,
         "Clinical Focus": (r.focus || "").toString().trim(),
         "Student Notes": (r.notes || "").toString().trim(),
-        "Total Hours Required": totalHours,
+        "Total Hours Required": effectiveTotalHours,
         "Approval Status": "Pending",
         ...(studentRecordId ? { "Student ID (Airtable)": studentRecordId } : {}),
+        ...(rotationRecordId ? { "Rotation": [rotationRecordId] } : {}),
       },
     };
   });
