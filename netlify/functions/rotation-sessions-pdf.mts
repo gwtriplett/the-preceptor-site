@@ -78,7 +78,10 @@ export default async (req: Request, context: Context) => {
     // (Airtable formulas only expose a linked record's primary-field text,
     // and Rotations' primary field is often the same student name repeated
     // across all of that student's rotations, so it can't disambiguate).
-    const sessionIds: string[] = (rf["Sessions"] || []).map((s: any) => s.id);
+    // Airtable's raw REST API (unlike some higher-level clients) returns a
+    // linked-record field as a plain array of record ID strings, not
+    // {id, name} objects — no .map(s => s.id) needed here.
+    const sessionIds: string[] = rf["Sessions"] || [];
     let sessions: any[] = [];
     if (sessionIds.length) {
       const formula = `OR(${sessionIds.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
@@ -150,6 +153,9 @@ export default async (req: Request, context: Context) => {
       headers: {
         "Content-Type": "application/pdf",
         "Content-Disposition": `attachment; filename="${filenameSafe}.pdf"`,
+        // Always reflect the rotation's current sessions — never serve a
+        // stale copy from a CDN/browser cache after new dates are added.
+        "Cache-Control": "no-store",
       },
     });
   } catch (err: any) {
