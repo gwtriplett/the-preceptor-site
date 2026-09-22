@@ -2239,13 +2239,12 @@ function onStudentPicked(prefix) {
   }
   const s = studentDirectory.find(x => x.id === id);
   if (!s) return;
-  const rawName = s['Student Name'] || '';
-  let displayName = rawName;
-  if (rawName.includes(',')) {
-    const [last, first] = rawName.split(',').map(x => x.trim());
-    displayName = `${first} ${last}`;
-  }
-  document.getElementById(`${prefix}-name`).value = displayName;
+  // Keep the stored "Last, First" format as-is — this value gets submitted
+  // verbatim as the new session's Student Name, and reformatting it here
+  // (as this used to) made the same student's sessions show up under two
+  // different name spellings depending on whether staff picked them from
+  // this dropdown or they requested it themselves via the student portal.
+  document.getElementById(`${prefix}-name`).value = s['Student Name'] || '';
   if (document.getElementById(`${prefix}-email`)) document.getElementById(`${prefix}-email`).value = s['Email'] || '';
   document.getElementById(`${prefix}-uni`).value = s['University / College'] || '';
   if (document.getElementById(`${prefix}-total`)) document.getElementById(`${prefix}-total`).value = s['Total Hours Required'] || '';
