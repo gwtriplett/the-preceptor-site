@@ -2611,7 +2611,18 @@ async function lookupStudent() {
   document.getElementById('student-empty').style.display = 'none';
   document.getElementById('student-results').style.display = 'block';
 
-  const totalReq = studentRecord['Total Hours Required'] || 0;
+  // Hours goal now lives on the student's current Rotation, not on the
+  // (now shared, per-email) Students record — fetch it before rendering any
+  // hours stats so the header/progress bar never briefly show a stale 0.
+  // Fall back to the legacy Students-level field for any record that
+  // predates this migration and has no Rotation on file.
+  const rotations = await loadStudentRotations(studentRecord);
+  window._studentPortalRotations = rotations;
+  const rotation = pickCurrentRotation(rotations);
+  const totalReq = (rotation && typeof rotation['Hours Goal'] === 'number')
+    ? rotation['Hours Goal']
+    : (studentRecord['Total Hours Required'] || 0);
+
   const signedOffDone = sessions.filter(s => s['Hours Signed Off']).reduce((a,s) => a + (s['Hours Signed Off'] || 0), 0);
   const priorHours = studentRecord['Prior Hours Completed'] || 0;
 
@@ -2620,20 +2631,15 @@ async function lookupStudent() {
   const studentName = studentRecord['Student Name'] || val;
   document.getElementById('s-name').textContent = studentName;
   const studentIdLabel = studentRecord['Student ID'] ? `ID ${studentRecord['Student ID']}` : 'ID not on file';
-  document.getElementById('s-meta').textContent = `${studentIdLabel} · Loading current rotation... · ${studentRecord['University / College'] || 'University not set'} · ${totalReq} hours required`;
-  loadStudentRotations(studentRecord).then(rotations => {
-    window._studentPortalRotations = rotations;
-    const rotation = pickCurrentRotation(rotations);
-    let courseLabel = 'No current rotation on file';
-    if (rotation && rotation['Course Name']) {
-      const start = rotation['Requested Start Date'] ? formatDate(rotation['Requested Start Date']) : null;
-      const end = rotation['Requested End Date'] ? formatDate(rotation['Requested End Date']) : null;
-      const dateRange = (start && end) ? ` (${start} – ${end})` : '';
-      courseLabel = `Current course: ${rotation['Course Name']}${dateRange}`;
-    }
-    document.getElementById('s-meta').textContent = `${studentIdLabel} · ${courseLabel} · ${studentRecord['University / College'] || 'University not set'} · ${totalReq} hours required`;
-    renderRotationsTab(rotations);
-  });
+  let courseLabel = 'No current rotation on file';
+  if (rotation && rotation['Course Name']) {
+    const start = rotation['Requested Start Date'] ? formatDate(rotation['Requested Start Date']) : null;
+    const end = rotation['Requested End Date'] ? formatDate(rotation['Requested End Date']) : null;
+    const dateRange = (start && end) ? ` (${start} – ${end})` : '';
+    courseLabel = `Current course: ${rotation['Course Name']}${dateRange}`;
+  }
+  document.getElementById('s-meta').textContent = `${studentIdLabel} · ${courseLabel} · ${studentRecord['University / College'] || 'University not set'} · ${totalReq} hours required`;
+  renderRotationsTab(rotations);
   document.getElementById('s-hours-done').textContent = totalDone.toFixed(1);
   document.getElementById('s-hours-left').textContent = Math.max(0, totalReq - totalDone).toFixed(1);
   document.getElementById('s-progress-bar').style.width = pct + '%';
