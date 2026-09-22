@@ -457,7 +457,7 @@
   </div>
   <div class="airtable-config">
     <span class="config-badge" id="sync-status">⚡ Live — Airtable connected</span>
-    <button class="btn btn-sm" id="settings-btn" onclick="openSettings()">Settings</button>
+    <button class="btn btn-teal btn-sm" id="settings-btn" onclick="openSettings()">Settings</button>
   </div>
 </div>
 
@@ -545,8 +545,8 @@
     <div id="pw-change-msg" style="font-size:12px;min-height:16px;margin-bottom:8px"></div>
     <div class="modal-footer">
       <button class="btn" onclick="closeSettings()">Cancel</button>
-      <button class="btn btn-sm" onclick="sendTestEmail()" style="margin-right:auto">Send test email</button>
-      <button class="btn btn-sm" onclick="changePassword()">Update password</button>
+      <button class="btn btn-primary btn-sm" onclick="sendTestEmail()" style="margin-right:auto">Send test email</button>
+      <button class="btn btn-primary btn-sm" onclick="changePassword()">Update password</button>
       <button class="btn btn-primary" onclick="saveSettings()">Save & Connect</button>
     </div>
   </div>
@@ -626,7 +626,7 @@
 
     <div id="req-rows-container"></div>
 
-    <button type="button" class="btn btn-sm" onclick="addRequestRow()" style="margin-bottom:6px;">+ Add another date for this student</button>
+    <button type="button" class="btn btn-teal btn-sm" onclick="addRequestRow()" style="margin-bottom:6px;">+ Add another date for this student</button>
     <div style="font-size:11px;color:var(--text-muted);margin-bottom:10px;">Logging several days at once? Add each date here and submit them all together.</div>
 
     <div class="modal-footer">
@@ -715,7 +715,7 @@
       <option value="Denied">Denied</option>
       <option value="No Show">No Show</option>
     </select>
-    <button class="btn btn-sm" onclick="loadSessions()">↻ Refresh</button>
+    <button class="btn btn-teal btn-sm" onclick="loadSessions()">↻ Refresh</button>
     <button class="btn btn-primary btn-sm" onclick="openStaffRequestModal()">+ Add Session</button>
     <button class="btn btn-success btn-sm" id="batch-approve-btn" style="display:none" onclick="batchApproveSessions()">✓ Approve Selected (<span id="batch-approve-count">0</span>)</button>
     <button class="btn btn-teal btn-sm" id="batch-complete-btn" style="display:none" onclick="batchMarkCompletedSessions()">Mark Completed (<span id="batch-complete-count">0</span>)</button>
@@ -764,7 +764,7 @@
         <input type="text" id="student-email-lookup" placeholder="email@university.edu  or  26-XXXX" autocomplete="off" />
       </div>
       <button class="btn btn-primary" onclick="lookupStudent()">Find my portal</button>
-      <button class="btn btn-sm" onclick="openModal('request-modal')">+ Request a session</button>
+      <button class="btn btn-primary btn-sm" onclick="openModal('request-modal')">+ Request a session</button>
     </div>
     <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
       Student ID format: <span style="font-family:monospace;background:var(--gray-50);border:1px solid var(--gray-100);border-radius:4px;padding:1px 6px">YY-XXXX</span>
@@ -898,7 +898,7 @@
           <div style="font-weight:600;font-size:13px;color:var(--blue-dark)">Your preceptorship agreement</div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Contact your coordinator to receive a copy of your signed agreement if you need it for your program.</div>
         </div>
-        <button class="btn btn-sm" onclick="setPortalTab('message', document.querySelectorAll('.portal-tab')[4]); document.getElementById('msg-text').value='Hi, could you please send me a copy of my signed preceptorship agreement? I need it for my program.'">Request a copy</button>
+        <button class="btn btn-teal btn-sm" onclick="setPortalTab('message', document.querySelectorAll('.portal-tab')[4]); document.getElementById('msg-text').value='Hi, could you please send me a copy of my signed preceptorship agreement? I need it for my program.'">Request a copy</button>
       </div>
     </div>
 
@@ -1105,7 +1105,7 @@
       <div class="section-title" style="font-size:18px">Revenue Dashboard</div>
       <div class="section-sub">Live from your Airtable student records</div>
     </div>
-    <button class="btn btn-sm" onclick="window.print()">Print Report</button>
+    <button class="btn btn-teal btn-sm" onclick="window.print()">Print Report</button>
   </div>
 
   <div class="rev-grid" id="rev-stats">
@@ -1148,6 +1148,12 @@
 
     <!-- Student Info Summary -->
     <div id="sdm-info" style="padding:16px 24px;border-bottom:1px solid var(--gray-100);display:grid;grid-template-columns:1fr 1fr;gap:8px;font-size:13px;"></div>
+
+    <!-- Rotations (session PDF download) -->
+    <div id="sdm-rotations-wrap" style="padding:16px 24px;border-bottom:1px solid var(--gray-100);display:none;">
+      <div style="font-size:13px;font-weight:600;color:var(--text);margin-bottom:10px;">📋 Rotations</div>
+      <div id="sdm-rotations"></div>
+    </div>
 
     <!-- Email Composer -->
     <div style="padding:16px 24px 20px 24px;">
@@ -1286,7 +1292,7 @@
     </div>
     <div id="recur-preview" style="margin-top:12px;font-size:12px;color:var(--text-muted)"></div>
     <div style="margin-top:14px;display:flex;gap:8px">
-      <button class="btn btn-sm" onclick="previewRecurring()">Preview sessions</button>
+      <button class="btn btn-primary btn-sm" onclick="previewRecurring()">Preview sessions</button>
       <button class="btn btn-primary" onclick="createRecurringSessions()">Create all sessions</button>
     </div>
   </div>
@@ -1380,7 +1386,7 @@
         <span><span class="legend-dot" style="background:#DC2626"></span>Denied</span>
       </div>
       <button class="btn btn-primary btn-sm" onclick="openCalendarRequestModal()">+ Request a session</button>
-      <button class="btn btn-sm" onclick="printCalendar()">&#128438; Print</button>
+      <button class="btn btn-teal btn-sm" onclick="printCalendar()">&#128438; Print</button>
     </div>
   </div>
 
@@ -1689,24 +1695,37 @@ function showEmailPanel(toEmail, subject, bodyText) {
   toast.style.cssText = 'position:fixed;bottom:20px;right:20px;width:400px;background:var(--white);border:1px solid var(--gray-100);border-radius:12px;z-index:9999;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);';
   const preview = bodyText.substring(0, 350) + (bodyText.length > 350 ? '...' : '');
   const mailtoLink = 'mailto:' + encodeURIComponent(toEmail) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(bodyText);
+  // Subject/preview/toEmail are escaped before going into innerHTML — and the
+  // Copy button's click handler is bound below (not inlined as an onclick
+  // attribute), since embedding arbitrary message text inside an HTML
+  // attribute breaks the moment that text contains a quote character,
+  // corrupting the whole toast (stray JS/CSS spilling out as visible text).
   toast.innerHTML = `
     <div style="background:var(--blue);color:white;padding:12px 16px;display:flex;align-items:center;justify-content:space-between;">
       <div>
         <div style="font-weight:600;font-size:13px">Email notification ready</div>
-        <div style="font-size:11px;opacity:0.85;margin-top:1px">To: ${toEmail}</div>
+        <div style="font-size:11px;opacity:0.85;margin-top:1px">To: ${escapeHtml(toEmail)}</div>
       </div>
       <button onclick="document.getElementById('email-toast').remove()" style="background:rgba(255,255,255,0.2);border:none;color:white;border-radius:6px;padding:4px 8px;cursor:pointer;font-size:14px">✕</button>
     </div>
     <div style="padding:14px 16px;">
       <div style="font-size:11px;font-weight:500;color:var(--text-muted);margin-bottom:3px">Subject</div>
-      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">${subject}</div>
+      <div style="font-size:13px;font-weight:600;margin-bottom:10px;color:var(--text)">${escapeHtml(subject)}</div>
       <div style="font-size:11px;font-weight:500;color:var(--text-muted);margin-bottom:5px">Message preview</div>
-      <div style="font-size:12px;color:var(--text-muted);line-height:1.6;max-height:110px;overflow:hidden;border:1px solid var(--gray-100);border-radius:6px;padding:10px;background:var(--gray-50);white-space:pre-wrap">${preview}</div>
+      <div style="font-size:12px;color:var(--text-muted);line-height:1.6;max-height:110px;overflow:hidden;border:1px solid var(--gray-100);border-radius:6px;padding:10px;background:var(--gray-50);white-space:pre-wrap">${escapeHtml(preview)}</div>
       <div style="margin-top:12px;display:flex;gap:8px">
-        <button id="copy-btn-${Date.now()}" onclick="navigator.clipboard.writeText(${JSON.stringify(bodyText)});this.textContent='✓ Copied!';setTimeout(()=>this.textContent='Copy',2000)" style="flex:1;padding:7px;border:1px solid var(--gray-100);background:var(--white);border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">Copy</button>
+        <button class="email-toast-copy-btn" style="flex:1;padding:7px;border:1px solid var(--gray-100);background:var(--white);border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">Copy</button>
         <a href="${mailtoLink}" style="flex:1;padding:7px;background:var(--blue);color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-decoration:none;text-align:center;display:flex;align-items:center;justify-content:center">Open in Mail</a>
       </div>
     </div>`;
+  const copyBtn = toast.querySelector('.email-toast-copy-btn');
+  if (copyBtn) {
+    copyBtn.addEventListener('click', () => {
+      navigator.clipboard.writeText(bodyText);
+      copyBtn.textContent = '✓ Copied!';
+      setTimeout(() => { copyBtn.textContent = 'Copy'; }, 2000);
+    });
+  }
   document.body.appendChild(toast);
   setTimeout(() => { if(toast.parentNode){ toast.style.transition='opacity 0.5s'; toast.style.opacity='0'; setTimeout(()=>toast.remove(),500); } }, 15000);
 }
@@ -1840,7 +1859,7 @@ function renderTable() {
     } else {
       actions = `<span style="font-size:11px;color:var(--text-muted)">${s['Signed Off By'] ? '✓ ' + s['Signed Off By'] : '—'}</span>`;
     }
-    actions += `<div><button class="btn btn-sm" style="margin-top:4px;padding:2px 8px;font-size:11px;" onclick="openEditHours('${s.id}')">✎ Edit hours</button></div>`;
+    actions += `<div><button class="btn btn-teal btn-sm" style="margin-top:4px;padding:2px 8px;font-size:11px;" onclick="openEditHours('${s.id}')">✎ Edit hours</button></div>`;
 
     const isActionable = status === 'Pending' || status === 'Approved' || needsSignoff;
     const selectCell = isActionable
@@ -2276,7 +2295,7 @@ function addRequestRow() {
     <div class="form-group"><label>Departure *</label><input type="time" id="req-end-${i}" value="17:00" /></div>
     <div class="form-group"><label>Hours</label><input type="number" id="req-hours-${i}" step="0.5" /></div>
     <div class="form-group full"><label>Clinical Focus (optional)</label><input type="text" id="req-focus-${i}" /></div>
-    <button type="button" class="btn btn-sm" style="margin-top:4px" onclick="removeRequestRow(${i})">✕ Remove this date</button>
+    <button type="button" class="btn btn-danger btn-sm" style="margin-top:4px" onclick="removeRequestRow(${i})">✕ Remove this date</button>
   `;
   container.appendChild(div);
 }
@@ -2708,6 +2727,9 @@ function renderRotationsTab(rotations) {
           <div><div style="color:var(--text-muted);font-size:11px">Status</div>${status}</div>
         </div>
         ${focus ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)"><strong style="color:var(--text-body)">Focus:</strong> ${focus}</div>` : ''}
+        <div style="margin-top:10px">
+          <a href="/.netlify/functions/rotation-sessions-pdf?rotationId=${r.id}" target="_blank" class="btn btn-teal btn-sm" style="text-decoration:none;display:inline-block;">⬇ Download session dates (PDF)</a>
+        </div>
       </div>`;
   }).join('');
 }
@@ -3196,6 +3218,12 @@ function studentDownloadCert() {
 
 
 // ── HELPERS ───────────────────────────────────────────
+function escapeHtml(str) {
+  return (str ?? '').toString()
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;').replace(/'/g, '&#39;');
+}
+
 function formatDate(d) {
   if (!d) return '—';
   const dt = new Date(d + 'T12:00:00');
@@ -3310,7 +3338,7 @@ function renderBlackoutList() {
   list.innerHTML = blackouts.map((b, i) => `
     <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--red-light);border-radius:6px;margin-bottom:6px;font-size:13px">
       <div><strong>${formatDate(b.date)}</strong>${b.reason ? ' — ' + b.reason : ''}</div>
-      <button class="btn btn-sm" style="color:var(--red);border-color:var(--red)" onclick="removeBlackout(${i})">Remove</button>
+      <button class="btn btn-danger btn-sm" onclick="removeBlackout(${i})">Remove</button>
     </div>`).join('');
 }
 
@@ -4073,8 +4101,43 @@ function openStudentModal(event, student) {
   // Email buttons
   renderSdmEmailButtons(student);
 
+  // Rotations — each gets a Download PDF link for its session list.
+  loadSdmRotations(student);
+
   m.style.display = 'block';
   document.body.style.overflow = 'hidden';
+}
+
+async function loadSdmRotations(student) {
+  const wrap = document.getElementById('sdm-rotations-wrap');
+  const list = document.getElementById('sdm-rotations');
+  if (!wrap || !list) return;
+  const rotationIds = student['Rotations'] || [];
+  if (!rotationIds.length) { wrap.style.display = 'none'; list.innerHTML = ''; return; }
+
+  wrap.style.display = 'block';
+  list.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">Loading…</div>';
+  try {
+    const formula = `OR(${rotationIds.map(id => `RECORD_ID()="${id}"`).join(',')})`;
+    const data = await atRead(STUDENTS_BASE_ID, ROTATIONS_TABLE_ID, `?filterByFormula=${encodeURIComponent(formula)}`);
+    const rotations = data ? (data.records || []).map(r => ({ id: r.id, ...r.fields })) : [];
+    rotations.sort((a, b) => (b['Requested Start Date'] || '').localeCompare(a['Requested Start Date'] || ''));
+    if (!rotations.length) { list.innerHTML = '<div style="font-size:12px;color:var(--text-muted)">No rotations on file.</div>'; return; }
+    list.innerHTML = rotations.map(r => {
+      const start = r['Requested Start Date'] ? formatDate(r['Requested Start Date']) : '?';
+      const end = r['Requested End Date'] ? formatDate(r['Requested End Date']) : '?';
+      return `
+        <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 0;border-bottom:1px solid var(--gray-50);font-size:12.5px;">
+          <div>
+            <div style="font-weight:600;color:var(--text)">${r['Course Name'] || 'Rotation'}</div>
+            <div style="color:var(--text-muted);font-size:11.5px;">${r['Semester / Quarter'] || ''} · ${start} – ${end} · ${r['Pipeline Status'] || ''}</div>
+          </div>
+          <a href="/.netlify/functions/rotation-sessions-pdf?rotationId=${r.id}" target="_blank" class="btn btn-teal btn-sm" style="text-decoration:none;">⬇ Download PDF</a>
+        </div>`;
+    }).join('');
+  } catch (e) {
+    list.innerHTML = '<div style="font-size:12px;color:var(--red)">Could not load rotations.</div>';
+  }
 }
 
 function closeStudentModal() {
