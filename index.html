@@ -577,6 +577,17 @@
       <div id="req-rotation-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
     </div>
 
+    <!-- Staff-only rotation picker: shown once staff pick an existing student
+         above, so sessions staff add by hand also get linked to a Rotation —
+         same as the student's own requests already do. Kept separate from
+         req-rotation (the student-facing picker) since staff see every
+         rotation on file, not just ones currently open for new scheduling. -->
+    <div class="form-group" id="req-staff-rotation-group" style="display:none;margin-bottom:16px;">
+      <label>Link to rotation</label>
+      <select id="req-staff-rotation" style="width:100%;padding:8px 10px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:13px;"></select>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">These sessions will be linked to this rotation so they show up in the student's Clinical Rotations tab and rotation PDF.</div>
+    </div>
+
     <div class="form-grid" style="margin-bottom:10px">
       <div class="form-group">
         <label>Student Name *</label>
@@ -1257,6 +1268,11 @@
       <select id="recur-student-picker" onchange="onStudentPicked('recur')" style="width:100%;padding:8px 10px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:13px;">
         <option value="">+ New / Manual Entry…</option>
       </select>
+    </div>
+    <div class="form-group" id="recur-rotation-group" style="display:none;margin-bottom:14px;">
+      <label>Link to rotation</label>
+      <select id="recur-rotation" style="width:100%;padding:8px 10px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:13px;"></select>
+      <div style="font-size:11px;color:var(--text-muted);margin-top:4px;">These sessions will be linked to this rotation so they show up in the student's Clinical Rotations tab and rotation PDF.</div>
     </div>
     <div class="form-grid" style="margin-bottom:14px">
       <div class="form-group">
@@ -2300,6 +2316,7 @@ function onStudentPicked(prefix) {
       const el = document.getElementById(`${prefix}-${k}`);
       if (el) el.value = '';
     });
+    populateStaffRotationPicker(prefix, null);
     return;
   }
   const s = studentDirectory.find(x => x.id === id);
@@ -2313,6 +2330,54 @@ function onStudentPicked(prefix) {
   if (document.getElementById(`${prefix}-email`)) document.getElementById(`${prefix}-email`).value = s['Email'] || '';
   document.getElementById(`${prefix}-uni`).value = s['University / College'] || '';
   if (document.getElementById(`${prefix}-total`)) document.getElementById(`${prefix}-total`).value = s['Total Hours Required'] || '';
+  populateStaffRotationPicker(prefix, s);
+}
+
+// Staff-side counterpart to populateRotationPicker() (which only serves the
+// student's own portal). Whenever staff pick an existing student in the
+// "Add Clinical Session(s)" or "Recurring session request" forms, this fills
+// a "Link to rotation" dropdown from THAT student's rotations — every one on
+// file, not just currently-schedulable ones, since staff may be backfilling
+// past sessions too — so sessions staff create get the same Rotation link
+// student self-service requests already get. Without it, sessions staff add
+// by hand never show up in the student's Clinical Rotations tab or rotation
+// PDF, even though they still count toward total hours.
+async function populateStaffRotationPicker(prefix, studentRecord) {
+  const groupId = prefix === 'req' ? 'req-staff-rotation-group' : `${prefix}-rotation-group`;
+  const selId = prefix === 'req' ? 'req-staff-rotation' : `${prefix}-rotation`;
+  const group = document.getElementById(groupId);
+  const sel = document.getElementById(selId);
+  if (!group || !sel) return;
+
+  if (!studentRecord) {
+    group.style.display = 'none';
+    sel.innerHTML = '';
+    return;
+  }
+
+  group.style.display = 'block';
+  sel.innerHTML = '<option value="">Loading rotations…</option>';
+  sel.disabled = true;
+
+  const rotations = await loadStudentRotations(studentRecord);
+  if (!rotations.length) {
+    sel.innerHTML = '<option value="">No rotations on file for this student</option>';
+    sel.disabled = true;
+    return;
+  }
+
+  sel.disabled = false;
+  const schedulable = rotations.filter(isSchedulableRotation);
+  const preferred = pickCurrentRotation(schedulable) || pickCurrentRotation(rotations) || rotations[0];
+  sel.innerHTML = [...rotations]
+    .sort((a, b) => (b['Requested Start Date'] || '').localeCompare(a['Requested Start Date'] || ''))
+    .map(r => {
+      const start = r['Requested Start Date'] ? formatDate(r['Requested Start Date']) : '?';
+      const end = r['Requested End Date'] ? formatDate(r['Requested End Date']) : '?';
+      const status = r['Pipeline Status'] ? ` — ${r['Pipeline Status']}` : '';
+      const selected = preferred && r.id === preferred.id ? ' selected' : '';
+      return `<option value="${r.id}"${selected}>${r['Course Name'] || 'Rotation'} — ${r['Semester / Quarter'] || ''} (${start} – ${end})${status}</option>`;
+    }).join('');
 }
 
 // ── MULTI-DATE ROWS (add several sessions for one student at once) ──
@@ -2492,6 +2557,11 @@ async function submitRequest() {
     // Entry), that's the exact enrollment record — link new sessions to it so
     // hours count against the right semester.
     const pickedStudentId = document.getElementById('req-student-picker')?.value || '';
+    // Which of that student's rotations these sessions belong to — populated
+    // by populateStaffRotationPicker() once a student is picked above. Not
+    // present for Manual Entry (no student record, so no rotations to link).
+    const staffRotationSel = document.getElementById('req-staff-rotation');
+    const staffRotationId = staffRotationSel && !staffRotationSel.disabled ? staffRotationSel.value : '';
     const records = validRows.map(r => {
       const hrs = parseFloat(r.hours) || calcHours(r.start, r.end);
       const fields = {
@@ -2506,6 +2576,7 @@ async function submitRequest() {
         'Approval Status': override ? 'Approved' : 'Pending'
       };
       if (pickedStudentId) fields['Student ID (Airtable)'] = pickedStudentId;
+      if (staffRotationId) fields['Rotation'] = [staffRotationId];
       if (override) {
         fields['Approved By'] = override.name;
         fields['Approved Date'] = today;
@@ -2561,6 +2632,7 @@ function clearRequestForm() {
   });
   const picker = document.getElementById('req-student-picker');
   if (picker) picker.value = '';
+  populateStaffRotationPicker('req', null);
   const rowsContainer = document.getElementById('req-rows-container');
   if (rowsContainer) rowsContainer.innerHTML = '';
   requestRowCount = 1;
@@ -2586,6 +2658,10 @@ function setRequestModalLocked(locked) {
   // status the same way.
   const rotationGroup = document.getElementById('req-rotation-group');
   if (rotationGroup) rotationGroup.style.display = locked ? 'block' : 'none';
+  // Staff's own rotation-linking picker (req-staff-rotation-group) is only
+  // relevant in staff mode, and only once a student is actually picked —
+  // populateStaffRotationPicker() handles showing/hiding it from there.
+  if (locked) populateStaffRotationPicker('req', null);
 }
 
 function openStaffRequestModal(prefillDate) {
@@ -3526,6 +3602,12 @@ async function createRecurringSessions() {
   if (!confirm(`Create ${dates.length} sessions for ${name}?`)) return;
   const cap = getCapacityLimit();
   const pickedStudentId = document.getElementById('recur-student-picker')?.value || '';
+  // Which of that student's rotations this recurring batch belongs to —
+  // populated by populateStaffRotationPicker() once a student is picked
+  // above. Without this, recurring sessions never show up in the student's
+  // Clinical Rotations tab or rotation PDF even though they count for hours.
+  const recurRotationSel = document.getElementById('recur-rotation');
+  const recurRotationId = recurRotationSel && !recurRotationSel.disabled ? recurRotationSel.value : '';
   let blocked = 0;
   const records = dates.filter(ds => {
     if (getSessionsOnDate(ds) >= cap) { blocked++; return false; }
@@ -3536,7 +3618,8 @@ async function createRecurringSessions() {
     'Session Date': ds, 'Start Time': tStart, 'End Time': tEnd,
     'Hours This Session': hrs, 'Clinical Focus': focus,
     'Total Hours Required': total, 'Approval Status': 'Pending',
-    ...(pickedStudentId ? { 'Student ID (Airtable)': pickedStudentId } : {})
+    ...(pickedStudentId ? { 'Student ID (Airtable)': pickedStudentId } : {}),
+    ...(recurRotationId ? { 'Rotation': [recurRotationId] } : {})
   }}));
   if (records.length === 0) { alert('All requested dates are at capacity. Please choose different dates.'); return; }
   // batch into groups of 10
