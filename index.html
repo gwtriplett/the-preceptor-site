@@ -3348,11 +3348,37 @@ Please review and update their record in Airtable.`
 }
 
 // ── MESSAGE COORDINATOR ───────────────────────────────
+// Every message (and cancellation request, below) is saved to the
+// Coordinator Messages table in Airtable via this public endpoint, and —
+// when a coordinator email is configured — also still emailed, so nothing
+// depends on remembering to check Airtable.
+async function submitCoordinatorMessage(subject, message) {
+  try {
+    const resp = await fetch('/.netlify/functions/message-submit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        studentName: window._studentPortalName || '',
+        studentEmail: window._studentPortalEmail || '',
+        studentRecordId: window._studentPortalRecordId || '',
+        subject, message
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) console.error('Could not save message to Airtable:', data.error);
+    return resp.ok;
+  } catch (e) {
+    console.error('Could not save message to Airtable:', e);
+    return false;
+  }
+}
+
 function sendStudentMessage() {
   const subject = document.getElementById('msg-subject').value;
   const text = document.getElementById('msg-text').value.trim();
   if (!subject) { alert('Please select a subject.'); return; }
   if (!text) { alert('Please enter a message.'); return; }
+  submitCoordinatorMessage(subject, text);
   const cfg = getEmailConfig();
   if (hasValidCoordinatorEmail(cfg)) {
     sendEmailViaClaudeAPI(cfg.fromEmail,
@@ -3366,7 +3392,9 @@ Student ID: ${window._studentPortalId || "—"}
 Message:
 ${text}
 
-Reply directly to the student at: ${window._studentPortalEmail}`
+Reply directly to the student at: ${window._studentPortalEmail}
+
+(This message has also been saved to the Coordinator Messages table in Airtable.)`
     );
   }
   document.getElementById('msg-sent-confirm').style.display = 'block';
@@ -3378,6 +3406,7 @@ Reply directly to the student at: ${window._studentPortalEmail}`
 // ── SESSION CANCELLATION ──────────────────────────────
 function requestCancelSession(sessionId, sessionDate, sessionFocus) {
   if (!confirm(`Request to cancel your session on ${sessionDate}?\n\nThis will notify your coordinator — do not assume the session is cancelled until you hear back.`)) return;
+  submitCoordinatorMessage('Session cancellation request', `Requested cancellation of the session on ${sessionDate}${sessionFocus ? ` (Clinical Focus: ${sessionFocus})` : ''}. Please update the session status in the scheduler and reply to confirm.`);
   const cfg = getEmailConfig();
   if (hasValidCoordinatorEmail(cfg)) {
     sendEmailViaClaudeAPI(cfg.fromEmail,
@@ -3388,7 +3417,9 @@ Session Date: ${sessionDate}
 Clinical Focus: ${sessionFocus}
 Student Email: ${window._studentPortalEmail}
 
-Please update the session status in the scheduler and reply to confirm the cancellation.`
+Please update the session status in the scheduler and reply to confirm the cancellation.
+
+(This request has also been saved to the Coordinator Messages table in Airtable.)`
     );
   }
   showEmailToast('Cancellation request sent to your coordinator. Do not assume the session is cancelled until you receive confirmation.', 'warn');
