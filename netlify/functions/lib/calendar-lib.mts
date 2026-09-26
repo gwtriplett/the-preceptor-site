@@ -14,6 +14,7 @@ export const STATUS_COLORS: Record<string, string> = {
   Pending: "#BA7517",
   Completed: "#0F6E56",
   Denied: "#A32D2D",
+  Cancelled: "#B4B2A9",
   "No Show": "#888780",
 };
 const DEFAULT_COLOR = "#1A73C8";

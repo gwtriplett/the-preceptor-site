@@ -76,6 +76,7 @@
   .badge-denied { background: var(--red-light); color: var(--red); }
   .badge-completed { background: var(--teal-light); color: var(--teal); }
   .badge-noshow { background: var(--gray-100); color: var(--gray-700); }
+  .badge-cancelled { background: var(--gray-100); color: var(--gray-700); text-decoration: line-through; }
 
   /* BUTTONS */
   .btn { padding: 7px 14px; border-radius: var(--radius-sm); border: 1px solid var(--gray-100); background: var(--white); font-size: 13px; font-weight: 500; cursor: pointer; color: var(--text); transition: all 0.15s; }
@@ -723,7 +724,7 @@
   <!-- CANCELLATION REQUESTS (hidden when there are none) -->
   <div class="card" id="cancel-requests-card" style="display:none;margin-bottom:16px;border:1.5px solid var(--amber)">
     <div class="section-head"><span class="section-title">⚑ Cancellation requests (<span id="cancel-requests-count">0</span>)</span></div>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Students asked to cancel these sessions from their portal. Approve sets the session to Denied with a "Cancelled at student request" note (so it stops counting toward hours); Decline keeps the session. Either way a reply opens in Gmail for you to send.</p>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Students asked to cancel these sessions from their portal. Approve sets the session to Cancelled (so it stops counting toward hours); Decline keeps the session. Either way a reply opens in Gmail for you to send.</p>
     <div class="tbl-wrap"><table style="width:100%">
       <thead><tr><th>Student</th><th>Session</th><th>Hours</th><th>Status</th><th></th></tr></thead>
       <tbody id="cancel-requests-tbody"></tbody>
@@ -746,6 +747,7 @@
       <option value="Approved">Approved</option>
       <option value="Completed">Completed</option>
       <option value="Denied">Denied</option>
+      <option value="Cancelled">Cancelled</option>
       <option value="No Show">No Show</option>
     </select>
     <button class="btn btn-teal btn-sm" onclick="loadSessions()">↻ Refresh</button>
@@ -1389,7 +1391,7 @@
         <button class="btn btn-primary btn-sm" id="audit-send-all-btn" style="display:none" onclick="openNextAuditEmail()">✉ Open Next in Gmail (<span id="audit-unsent-count">0</span> left)</button>
       </div>
     </div>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Finds rotations (not Released) whose Prior Hours + Pending/Approved/Completed sessions exceed the Hours Goal. Denied and No Show sessions are not counted. The deadline in each email is three business days after today. Send opens a pre-filled Gmail draft — review it and click Send in Gmail. Nothing is sent automatically.</p>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Finds rotations (not Released) whose Prior Hours + Pending/Approved/Completed sessions exceed the Hours Goal. Denied, Cancelled and No Show sessions are not counted. The deadline in each email is three business days after today. Send opens a pre-filled Gmail draft — review it and click Send in Gmail. Nothing is sent automatically.</p>
     <div id="audit-summary" style="font-size:12px;color:var(--text-muted);margin-bottom:8px"></div>
     <div class="tbl-wrap">
       <table style="width:100%">
@@ -1936,7 +1938,7 @@ function renderTable() {
 
   tbody.innerHTML = sessions.map(s => {
     const status = s['Approval Status'] || 'Pending';
-    const badgeClass = { Pending:'badge-pending', Approved:'badge-approved', Denied:'badge-denied', Completed:'badge-completed', 'No Show':'badge-noshow' }[status] || 'badge-pending';
+    const badgeClass = { Pending:'badge-pending', Approved:'badge-approved', Denied:'badge-denied', Cancelled:'badge-cancelled', Completed:'badge-completed', 'No Show':'badge-noshow' }[status] || 'badge-pending';
     const pct = s['Total Hours Required'] ? Math.min(100, Math.round((s['Hours Signed Off'] || 0) / s['Total Hours Required'] * 100)) : 0;
     const fillClass = pct >= 100 ? 'done' : pct >= 75 ? 'warn' : '';
     const needsSignoff = status === 'Completed' && !s['Signed Off By'];
@@ -2895,7 +2897,7 @@ async function viewRotationSessions(rotationId) {
       list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">No sessions on file for this rotation.</div>';
       return;
     }
-    const badgeClassFor = { Pending: 'badge-pending', Approved: 'badge-approved', Denied: 'badge-denied', Completed: 'badge-completed', 'No Show': 'badge-noshow' };
+    const badgeClassFor = { Pending: 'badge-pending', Approved: 'badge-approved', Denied: 'badge-denied', Cancelled: 'badge-cancelled', Completed: 'badge-completed', 'No Show': 'badge-noshow' };
     list.innerHTML = sessions.map(s => {
       const badgeClass = badgeClassFor[s['Approval Status']] || 'badge-pending';
       return `
@@ -3106,7 +3108,7 @@ async function lookupStudent() {
   const list = document.getElementById('student-sessions-list');
   list.innerHTML = sessions.map(s => {
     const status = s['Approval Status'] || 'Pending';
-    const badgeClass = { Pending:'badge-pending', Approved:'badge-approved', Denied:'badge-denied', Completed:'badge-completed', 'No Show':'badge-noshow' }[status] || 'badge-pending';
+    const badgeClass = { Pending:'badge-pending', Approved:'badge-approved', Denied:'badge-denied', Cancelled:'badge-cancelled', Completed:'badge-completed', 'No Show':'badge-noshow' }[status] || 'badge-pending';
     const d = s['Session Date'] ? new Date(s['Session Date'] + 'T12:00:00') : null;
     const month = d ? d.toLocaleString('default', { month: 'short' }).toUpperCase() : '—';
     const day = d ? d.getDate() : '—';
@@ -3115,7 +3117,7 @@ async function lookupStudent() {
       ? `<div class="approved-indicator" style="color:var(--green);margin-bottom:4px"><span class="dot dot-green"></span>Cleared to show up</div>`
       : status === 'Pending'
       ? `<div class="approved-indicator" style="color:var(--amber);margin-bottom:4px"><span class="dot dot-yellow"></span>Awaiting approval</div>`
-      : status === 'Denied' && String(s['Preceptor Notes'] || '').startsWith('Cancelled at student request')
+      : status === 'Cancelled' || (status === 'Denied' && String(s['Preceptor Notes'] || '').startsWith('Cancelled at student request'))
       ? `<div class="approved-indicator" style="color:var(--text-muted);margin-bottom:4px"><span class="dot dot-red"></span>Cancelled at your request</div>`
       : status === 'Denied'
       ? `<div class="approved-indicator" style="color:var(--red);margin-bottom:4px"><span class="dot dot-red"></span>Not approved — contact coordinator</div>`
@@ -4143,12 +4145,12 @@ function renderCalendar() {
 }
 
 function statusClass(s) {
-  const map = { 'Approved':'approved','Pending':'pending','Completed':'completed','Denied':'denied','No Show':'noshow' };
+  const map = { 'Approved':'approved','Pending':'pending','Completed':'completed','Denied':'denied','Cancelled':'noshow','No Show':'noshow' };
   return map[s] || 'pending';
 }
 
 function sessionsOnDate(dateStr) {
-  return allSessions.filter(s => s['Session Date'] === dateStr && s['Approval Status'] !== 'Denied');
+  return allSessions.filter(s => s['Session Date'] === dateStr && s['Approval Status'] !== 'Denied' && s['Approval Status'] !== 'Cancelled');
 }
 
 function isoDate(d) {
@@ -4299,6 +4301,12 @@ function renderDay() {
   if (denied.length > 0) {
     html += `<div style="margin-top:16px;padding:10px 14px;background:var(--red-light);border-radius:8px;font-size:12px;color:var(--red)">
       <strong>${denied.length} denied session${denied.length!==1?'s':''} not shown above:</strong> ${denied.map(s=>s['Student Name']).join(', ')}
+    </div>`;
+  }
+  const cancelled = allDay.filter(s => s['Approval Status'] === 'Cancelled');
+  if (cancelled.length > 0) {
+    html += `<div style="margin-top:8px;padding:10px 14px;background:var(--gray-50);border-radius:8px;font-size:12px;color:var(--text-muted)">
+      <strong>${cancelled.length} cancelled session${cancelled.length!==1?'s':''} not shown above:</strong> ${cancelled.map(s=>s['Student Name']).join(', ')}
     </div>`;
   }
 
@@ -4990,14 +4998,15 @@ async function resolveCancelRequest(id, approve) {
   if (!s) return;
   const dateStr = formatDate(s['Session Date']);
   if (!confirm(approve
-    ? `Cancel ${s['Student Name']}'s session on ${dateStr}?\n\nThe session will be set to Denied ("Cancelled at student request") and a confirmation email will open in Gmail.`
+    ? `Cancel ${s['Student Name']}'s session on ${dateStr}?\n\nThe session will be set to Cancelled and a confirmation email will open in Gmail.`
     : `Decline the cancellation request? ${s['Student Name']}'s session on ${dateStr} will stay on the schedule and a reply will open in Gmail.`)) return;
 
   const today = new Date().toISOString().split('T')[0];
   const fields = approve
-    ? { 'Approval Status': 'Denied', 'Cancellation Requested': false, 'Preceptor Notes': `Cancelled at student request (${formatDate(today)})` }
+    ? { 'Approval Status': 'Cancelled', 'Cancellation Requested': false, 'Preceptor Notes': `Cancelled at student request (${formatDate(today)})` }
     : { 'Cancellation Requested': false };
-  const res = await airtableRequest('PATCH', `/${id}`, { fields });
+  // typecast lets Airtable accept "Cancelled" even if the select option is missing
+  const res = await airtableRequest('PATCH', `/${id}`, { fields, typecast: true });
   if (!res || res.error) { alert('Could not update the session: ' + (res?.error?.message || res?.error || 'unknown error')); return; }
 
   // Mark the matching Coordinator Messages as Resolved (best effort)

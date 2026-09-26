@@ -227,7 +227,7 @@ export default async (req: Request, context: Context) => {
       const studentSessionsData: any = await studentSessionsResp.json();
       if (studentSessionsResp.ok) {
         hoursUsed = ((studentSessionsData?.records || []) as any[])
-          .filter((r) => (r.fields?.["Rotation"] || []).includes(rotationRecordId) && r.fields?.["Approval Status"] !== "Denied")
+          .filter((r) => (r.fields?.["Rotation"] || []).includes(rotationRecordId) && r.fields?.["Approval Status"] !== "Denied" && r.fields?.["Approval Status"] !== "Cancelled")
           .reduce((sum, r) => sum + (Number(r.fields?.["Hours This Session"]) || 0), 0);
         capExceeded = hoursUsed + hoursRequested > hoursCap;
       }
