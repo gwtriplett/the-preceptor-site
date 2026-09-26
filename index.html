@@ -468,7 +468,7 @@
       <span class="modal-title">Email preview</span>
       <button class="modal-close" onclick="closeModal('audit-preview-modal')">✕</button>
     </div>
-    <div style="font-size:13px;margin-bottom:6px"><b>To:</b> <span id="audit-preview-to"></span> &nbsp; <b>Reply-To:</b> coordinator@thepreceptorsite.com</div>
+    <div style="font-size:13px;margin-bottom:6px"><b>To:</b> <span id="audit-preview-to"></span></div>
     <div style="font-size:13px;margin-bottom:10px"><b>Subject:</b> <span id="audit-preview-subject"></span></div>
     <div id="audit-preview-body" style="white-space:pre-wrap;font-size:13px;line-height:1.5;max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:12px"></div>
   </div>
@@ -1376,10 +1376,10 @@
       <span class="section-title">Schedule audit</span>
       <div style="display:flex;gap:8px;align-items:center">
         <button class="btn btn-sm" onclick="runScheduleAudit()">Run Audit</button>
-        <button class="btn btn-primary btn-sm" id="audit-send-all-btn" style="display:none" onclick="sendAllAuditEmails()">✉ Send All (<span id="audit-unsent-count">0</span>)</button>
+        <button class="btn btn-primary btn-sm" id="audit-send-all-btn" style="display:none" onclick="openNextAuditEmail()">✉ Open Next in Gmail (<span id="audit-unsent-count">0</span> left)</button>
       </div>
     </div>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Finds rotations (not Released) whose Prior Hours + Pending/Approved/Completed sessions exceed the Hours Goal. Denied and No Show sessions are not counted. The deadline in each email is three business days after the day it is sent. Review each email before sending — nothing is sent automatically.</p>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Finds rotations (not Released) whose Prior Hours + Pending/Approved/Completed sessions exceed the Hours Goal. Denied and No Show sessions are not counted. The deadline in each email is three business days after today. Send opens a pre-filled Gmail draft — review it and click Send in Gmail. Nothing is sent automatically.</p>
     <div id="audit-summary" style="font-size:12px;color:var(--text-muted);margin-bottom:8px"></div>
     <div class="tbl-wrap">
       <table style="width:100%">
@@ -4912,8 +4912,7 @@ function renderAuditTable() {
         <td style="font-size:12px;color:var(--amber)">${r.outOfRange.length ? '⚠ Outside dates:<br>' + r.outOfRange.map(d => auditEsc(d.label)).join('<br>') : ''}</td>
         <td style="white-space:nowrap">
           <button class="btn btn-sm" onclick="previewAuditEmail(${i})">Preview</button>
-          <button class="btn btn-sm" onclick="sendAuditTestEmail(${i})" title="Send this student's email to your own address instead">Test to me</button>
-          ${_auditSent.has(r.rotationId) ? '<span style="color:var(--green);font-weight:700;margin-left:6px">✓ Sent</span>' : `<button class="btn btn-primary btn-sm" onclick="sendAuditEmails([${i}])" ${r.email ? '' : 'disabled'}>Send</button>`}
+          <button class="btn ${_auditSent.has(r.rotationId) ? '' : 'btn-primary'} btn-sm" onclick="openAuditEmail(${i})" ${r.email ? '' : 'disabled'}>${_auditSent.has(r.rotationId) ? 'Reopen' : 'Send'}</button>${_auditSent.has(r.rotationId) ? '<span style="color:var(--green);font-weight:700;margin-left:6px">✓ Opened</span>' : ''}
         </td>
       </tr>`).join('');
   }
@@ -4935,67 +4934,25 @@ function previewAuditEmail(i) {
   openModal('audit-preview-modal');
 }
 
-async function sendAuditEmails(indexes) {
-  const deadline = auditDeadlineText();
-  const rows = indexes.map(i => _auditRows[i]).filter(r => r && r.email && !_auditSent.has(r.rotationId));
-  if (!rows.length) return;
-  if (rows.length === 1 && !confirm(`Send the schedule audit email to ${rows[0].studentName} (${rows[0].email})?`)) return;
-  try {
-    const resp = await fetch('/.netlify/functions/schedule-audit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        staffPassword: staffPasswordEntered,
-        action: 'send',
-        emails: rows.map(r => ({ rotationId: r.rotationId, to: r.email, deadline, ...buildScheduleAuditEmail(r, deadline) }))
-      })
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
-    (data.results || []).filter(x => x.ok).forEach(x => _auditSent.add(x.rotationId));
-    renderAuditTable();
-    const failed = (data.results || []).filter(x => !x.ok);
-    if (failed.length) alert(`${failed.length} failed:\n` + failed.map(f => `${f.to || '(missing email)'}: ${f.error}`).join('\n'));
-  } catch (e) {
-    console.error(e);
-    alert('Could not send emails: ' + e.message);
-  }
-}
-
-async function sendAuditTestEmail(i) {
+// Same as the Revenue tab's student emails: open a pre-filled Gmail compose
+// window so staff can review and hit Send from their own inbox.
+function openAuditEmail(i) {
   const r = _auditRows[i];
-  let saved = '';
-  try { saved = localStorage.getItem('tps_audit_test_email') || ''; } catch {}
-  const to = (prompt(`Send ${r.studentName}'s audit email to which address? (the student will NOT receive it)`, saved || 'coordinator@thepreceptorsite.com') || '').trim();
-  if (!to) return;
-  try { localStorage.setItem('tps_audit_test_email', to); } catch {}
-  const deadline = auditDeadlineText();
-  const email = buildScheduleAuditEmail(r, deadline);
-  try {
-    const resp = await fetch('/.netlify/functions/schedule-audit', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        staffPassword: staffPasswordEntered,
-        action: 'send',
-        emails: [{ rotationId: r.rotationId, to, deadline, subject: '[TEST] ' + email.subject, body: email.body }]
-      })
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
-    const res = (data.results || [])[0];
-    alert(res?.ok ? `Test email sent to ${to}.` : `Test failed: ${res?.error || 'unknown error'}`);
-  } catch (e) {
-    console.error(e);
-    alert('Could not send test email: ' + e.message);
-  }
+  if (!r || !r.email) return;
+  const email = buildScheduleAuditEmail(r, auditDeadlineText());
+  const url = 'https://mail.google.com/mail/?view=cm&fs=1' +
+    '&to=' + encodeURIComponent(r.email) +
+    '&su=' + encodeURIComponent(email.subject) +
+    '&body=' + encodeURIComponent(email.body);
+  window.open(url, '_blank');
+  _auditSent.add(r.rotationId);
+  renderAuditTable();
 }
 
-function sendAllAuditEmails() {
-  const idx = _auditRows.map((r, i) => i).filter(i => _auditRows[i].email && !_auditSent.has(_auditRows[i].rotationId));
-  if (!idx.length) return;
-  if (!confirm(`Send schedule audit emails to ${idx.length} student${idx.length !== 1 ? 's' : ''}?`)) return;
-  sendAuditEmails(idx);
+// Browsers only allow one new window per click, so work through the list one at a time.
+function openNextAuditEmail() {
+  const i = _auditRows.findIndex(r => r.email && !_auditSent.has(r.rotationId));
+  if (i >= 0) openAuditEmail(i);
 }
 
 </script>

@@ -1,8 +1,7 @@
 import type { Context, Config } from "@netlify/functions";
-import { makeTransport } from "./lib/calendar-lib.mts";
 
-// Finds over-scheduled rotations (action "audit") and sends the staff-reviewed
-// audit emails (action "send"). Nothing is sent without an explicit "send" call.
+// Finds over-scheduled rotations for the staff Schedule Audit. Emails are opened
+// as Gmail drafts in the browser (like the Revenue tab), not sent from here.
 
 const BASE_ID = "appf6D9Nbhb5Wg43L";
 const ROTATIONS_TABLE = "tbl6l75OeBLNzSp0i";
@@ -32,18 +31,6 @@ const S = {
 };
 
 const COUNTED = new Set(["Pending", "Approved", "Completed"]);
-const REPLY_TO = "coordinator@thepreceptorsite.com";
-
-// Plain-text body -> simple HTML: bold the "Audit findings:" heading and the
-// deadline date, make URLs clickable. The plain text is still sent as a fallback.
-function toHtml(text: string, deadline: string): string {
-  const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
-  let html = esc(text);
-  html = html.replace("Audit findings:", "<b>Audit findings:</b>");
-  if (deadline) html = html.split(esc(deadline)).join(`<b>${esc(deadline)}</b>`);
-  html = html.replace(/https?:\/\/[^\s<]+/g, (u) => `<a href="${u}">${u}</a>`);
-  return `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">${html}</div>`;
-}
 
 function json(body: any, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -195,33 +182,7 @@ export default async (req: Request, context: Context) => {
     }
   }
 
-  if (input.action === "send") {
-    const emails = Array.isArray(input.emails) ? input.emails : [];
-    if (emails.length === 0) return json({ error: "No emails provided." }, 400);
-    let transport;
-    try {
-      transport = makeTransport();
-    } catch (err: any) {
-      return json({ error: err?.message || "Email transport not configured." }, 500);
-    }
-    const results: { rotationId: string; to: string; ok: boolean; error?: string }[] = [];
-    for (const e of emails) {
-      const to = (e?.to || "").toString().trim();
-      if (!to || !e.subject || !e.body) {
-        results.push({ rotationId: e?.rotationId || "", to, ok: false, error: "Missing to/subject/body" });
-        continue;
-      }
-      try {
-        await transport.sendMail({ from: process.env.GMAIL_USER, to, replyTo: REPLY_TO, subject: e.subject, text: e.body, html: toHtml(e.body, (e.deadline || "").toString()) });
-        results.push({ rotationId: e.rotationId || "", to, ok: true });
-      } catch (err: any) {
-        results.push({ rotationId: e.rotationId || "", to, ok: false, error: err?.message || "Send failed" });
-      }
-    }
-    return json({ ok: results.every((r) => r.ok), results });
-  }
-
-  return json({ error: 'action must be "audit" or "send"' }, 400);
+  return json({ error: 'action must be "audit"' }, 400);
 };
 
 export const config: Config = {
