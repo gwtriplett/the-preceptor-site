@@ -462,6 +462,18 @@
 </div>
 
 <!-- SETTINGS MODAL -->
+<div class="modal-backdrop" id="audit-preview-modal">
+  <div class="modal" style="width:680px;">
+    <div class="modal-head">
+      <span class="modal-title">Email preview</span>
+      <button class="modal-close" onclick="closeModal('audit-preview-modal')">✕</button>
+    </div>
+    <div style="font-size:13px;margin-bottom:6px"><b>To:</b> <span id="audit-preview-to"></span> &nbsp; <b>Reply-To:</b> coordinator@thepreceptorsite.com</div>
+    <div style="font-size:13px;margin-bottom:10px"><b>Subject:</b> <span id="audit-preview-subject"></span></div>
+    <div id="audit-preview-body" style="white-space:pre-wrap;font-size:13px;line-height:1.5;max-height:60vh;overflow:auto;border:1px solid var(--border);border-radius:8px;padding:12px"></div>
+  </div>
+</div>
+
 <div class="modal-backdrop" id="settings-modal">
   <div class="modal">
     <div class="modal-head">
@@ -1354,6 +1366,26 @@
         <tbody id="portal-access-tbody">
           <tr><td colspan="5" style="text-align:center;padding:20px;color:var(--text-muted)">No students loaded yet.</td></tr>
         </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- SCHEDULE AUDIT -->
+  <div class="card" style="margin-bottom:16px">
+    <div class="section-head">
+      <span class="section-title">Schedule audit</span>
+      <div style="display:flex;gap:8px;align-items:center">
+        <label style="font-size:12px;color:var(--text-muted)">Deadline <input type="date" id="audit-deadline" style="font-family:inherit;font-size:12px;padding:4px 6px"></label>
+        <button class="btn btn-sm" onclick="runScheduleAudit()">Run Audit</button>
+        <button class="btn btn-primary btn-sm" id="audit-send-all-btn" style="display:none" onclick="sendAllAuditEmails()">✉ Send All (<span id="audit-unsent-count">0</span>)</button>
+      </div>
+    </div>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Finds rotations (not Released) whose Prior Hours + Pending/Approved/Completed sessions exceed the Hours Goal. Denied and No Show sessions are not counted. Review each email before sending — nothing is sent automatically.</p>
+    <div id="audit-summary" style="font-size:12px;color:var(--text-muted);margin-bottom:8px"></div>
+    <div class="tbl-wrap">
+      <table style="width:100%">
+        <thead><tr><th>Student</th><th>Rotation</th><th>Goal</th><th>Scheduled</th><th>Over</th><th>Dates affected</th><th>Warnings</th><th></th></tr></thead>
+        <tbody id="audit-tbody"><tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted)">Click Run Audit to check schedules.</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -4713,6 +4745,11 @@ If you have any questions, or if your plans have changed, please do not hesitate
 
 ${sig}`, toEmail
     },
+    (() => {
+      const row = _auditRows.find(r => (r.email || '').toLowerCase() === (toEmail || '').toLowerCase());
+      const e = buildScheduleAuditEmail(row, auditDeadlineText(), fullName);
+      return { label: '📊 Schedule Audit – Action Needed', group: 'Reminders', subject: e.subject, body: e.body, toEmail };
+    })(),
     {
       label: '✍️ 11. Nudge — Agreement Not Signed', group: 'Nudges',
       subject: 'Your Preceptorship Agreement is Waiting — Action Needed | The Preceptor Site',
@@ -4764,6 +4801,194 @@ function sendSdmEmail(group, idx) {
     '&su=' + encodeURIComponent(email.subject) +
     '&body=' + encodeURIComponent(email.body);
   window.open(url, '_blank');
+}
+
+// ══════════════════════════════════════════════════════════════
+// SCHEDULE AUDIT
+// ══════════════════════════════════════════════════════════════
+let _auditRows = [];
+const _auditSent = new Set();
+
+function auditEsc(v) {
+  return String(v ?? '').replace(/[&<>"']/g, c => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+}
+function auditFmtDate(iso) {
+  if (!iso) return '';
+  const [y, m, d] = iso.slice(0, 10).split('-');
+  return `${m}/${d}/${y}`;
+}
+function auditDeadlineText() {
+  const v = document.getElementById('audit-deadline')?.value;
+  if (!v) return '';
+  return new Date(v + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+}
+
+// Shared by the audit table and the email composer. Missing values stay as
+// [bracketed] placeholders, which the preview renders in bold red.
+function buildScheduleAuditEmail(row, deadline, fallbackName) {
+  const name = row?.studentName || fallbackName || '[Student Name]';
+  const due = deadline || '[Deadline]';
+  const dates = row
+    ? (row.datesAffected.length ? '\n' + row.datesAffected.map(d => `   • ${d.label}`).join('\n') : 'None of your upcoming sessions (the extra hours come from sessions already completed)')
+    : '[Dates Affected]';
+  return {
+    subject: 'Action Needed: Schedule Audit Results – The Preceptor Site',
+    body: `Dear ${name},
+
+The Preceptor Site (TPS) routinely audits the clinical schedule to ensure hours requests are accurate and that clinical time is available for every student in the program.
+
+During our recent audit, we found that your schedule is over-scheduled.
+
+Audit findings:
+- Hours goal for this rotation: ${row ? row.hoursGoal : '[Hours Goal]'}
+- Hours currently scheduled: ${row ? row.scheduledTotal : '[Scheduled Total]'}
+- Hours over: ${row ? row.hoursOver : '[Hours Over]'}
+- Dates affected: ${dates}
+
+Action needed by ${due}:
+Please adjust your schedule using ONE of these options:
+1. Reply to this email with the dates you would like to cancel.
+   OR
+2. Log in to the student portal at thepreceptorsite.netlify.app and request modifications or cancellations there.
+
+If we do not hear from you by ${due}, TPS may adjust your schedule to match your approved hours so the time can be offered to other students.
+
+If you believe this finding is an error, please reply to this email and we will review it with you.
+
+Thank you for your prompt attention.
+
+Sincerely,
+
+Trip Triplett
+Preceptorship Coordinator
+The Preceptor Site | a division of TMM Medical Group
+3520 High Street, Suite 100, Portsmouth, VA 23707
+coordinator@thepreceptorsite.com | 757-977-9675`
+  };
+}
+
+async function runScheduleAudit() {
+  const tbody = document.getElementById('audit-tbody');
+  tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted)">Running audit…</td></tr>';
+  try {
+    const resp = await fetch('/.netlify/functions/schedule-audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ staffPassword: staffPasswordEntered, action: 'audit' })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
+    _auditRows = data.flagged || [];
+    _auditSent.clear();
+    const oor = data.outOfRangeOnly || [];
+    document.getElementById('audit-summary').innerHTML =
+      `Checked ${data.rotationsChecked} rotations — <b>${_auditRows.length}</b> over-scheduled.` +
+      (oor.length ? `<br>⚠ Sessions outside requested dates (not over-scheduled): ${oor.map(r => `${auditEsc(r.studentName)} (${r.outOfRange.map(d => auditEsc(d.label)).join(', ')})`).join('; ')}` : '');
+    renderAuditTable();
+  } catch (e) {
+    console.error(e);
+    tbody.innerHTML = `<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--red)">Audit failed: ${auditEsc(e.message)}</td></tr>`;
+  }
+}
+
+function renderAuditTable() {
+  const tbody = document.getElementById('audit-tbody');
+  if (!_auditRows.length) {
+    tbody.innerHTML = '<tr><td colspan="8" style="text-align:center;padding:20px;color:var(--text-muted)">No over-scheduled rotations found.</td></tr>';
+  } else {
+    tbody.innerHTML = _auditRows.map((r, i) => `
+      <tr>
+        <td>${auditEsc(r.studentName)}<div style="font-size:11px;color:var(--text-muted)">${auditEsc(r.email) || '<span style="color:var(--red);font-weight:700">No email</span>'}</div></td>
+        <td style="font-size:12px">${auditFmtDate(r.startDate)} – ${auditFmtDate(r.endDate)}<div style="font-size:11px;color:var(--text-muted)">${auditEsc([r.placementLabel, r.seatStatus].filter(Boolean).join(" · "))}</div></td>
+        <td>${r.hoursGoal}</td>
+        <td>${r.scheduledTotal}${r.priorHours ? `<div style="font-size:11px;color:var(--text-muted)">incl. ${r.priorHours} prior</div>` : ''}</td>
+        <td style="color:var(--red);font-weight:700">${r.hoursOver}</td>
+        <td style="font-size:12px">${r.datesAffected.map(d => `${auditEsc(d.label)} <span style="color:var(--text-muted)">(${auditEsc(d.status)})</span>`).join('<br>') || '<span style="color:var(--text-muted)">—</span>'}</td>
+        <td style="font-size:12px;color:var(--amber)">${r.outOfRange.length ? '⚠ Outside dates:<br>' + r.outOfRange.map(d => auditEsc(d.label)).join('<br>') : ''}</td>
+        <td style="white-space:nowrap">
+          <button class="btn btn-sm" onclick="previewAuditEmail(${i})">Preview</button>
+          <button class="btn btn-sm" onclick="sendAuditTestEmail(${i})" title="Send this student's email to your own address instead">Test to me</button>
+          ${_auditSent.has(r.rotationId) ? '<span style="color:var(--green);font-weight:700;margin-left:6px">✓ Sent</span>' : `<button class="btn btn-primary btn-sm" onclick="sendAuditEmails([${i}])" ${r.email ? '' : 'disabled'}>Send</button>`}
+        </td>
+      </tr>`).join('');
+  }
+  const unsent = _auditRows.filter(r => r.email && !_auditSent.has(r.rotationId)).length;
+  document.getElementById('audit-unsent-count').textContent = unsent;
+  document.getElementById('audit-send-all-btn').style.display = unsent > 0 ? 'inline-flex' : 'none';
+}
+
+function previewAuditEmail(i) {
+  const r = _auditRows[i];
+  const email = buildScheduleAuditEmail(r, auditDeadlineText());
+  document.getElementById('audit-preview-to').textContent = r.email || '(no email on file)';
+  document.getElementById('audit-preview-subject').textContent = email.subject;
+  document.getElementById('audit-preview-body').innerHTML = auditEsc(email.body)
+    .replace(/\[[^\]]+\]/g, m => `<b style="color:var(--red)">${m}</b>`);
+  openModal('audit-preview-modal');
+}
+
+async function sendAuditEmails(indexes) {
+  const deadline = auditDeadlineText();
+  if (!deadline) { alert('Pick a Deadline date first — it goes into every email.'); return; }
+  const rows = indexes.map(i => _auditRows[i]).filter(r => r && r.email && !_auditSent.has(r.rotationId));
+  if (!rows.length) return;
+  if (rows.length === 1 && !confirm(`Send the schedule audit email to ${rows[0].studentName} (${rows[0].email})?`)) return;
+  try {
+    const resp = await fetch('/.netlify/functions/schedule-audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        staffPassword: staffPasswordEntered,
+        action: 'send',
+        emails: rows.map(r => ({ rotationId: r.rotationId, to: r.email, ...buildScheduleAuditEmail(r, deadline) }))
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
+    (data.results || []).filter(x => x.ok).forEach(x => _auditSent.add(x.rotationId));
+    renderAuditTable();
+    const failed = (data.results || []).filter(x => !x.ok);
+    if (failed.length) alert(`${failed.length} failed:\n` + failed.map(f => `${f.to || '(missing email)'}: ${f.error}`).join('\n'));
+  } catch (e) {
+    console.error(e);
+    alert('Could not send emails: ' + e.message);
+  }
+}
+
+async function sendAuditTestEmail(i) {
+  const r = _auditRows[i];
+  let saved = '';
+  try { saved = localStorage.getItem('tps_audit_test_email') || ''; } catch {}
+  const to = (prompt(`Send ${r.studentName}'s audit email to which address? (the student will NOT receive it)`, saved || 'coordinator@thepreceptorsite.com') || '').trim();
+  if (!to) return;
+  try { localStorage.setItem('tps_audit_test_email', to); } catch {}
+  const email = buildScheduleAuditEmail(r, auditDeadlineText());
+  try {
+    const resp = await fetch('/.netlify/functions/schedule-audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        staffPassword: staffPasswordEntered,
+        action: 'send',
+        emails: [{ rotationId: r.rotationId, to, subject: '[TEST] ' + email.subject, body: email.body }]
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
+    const res = (data.results || [])[0];
+    alert(res?.ok ? `Test email sent to ${to}.` : `Test failed: ${res?.error || 'unknown error'}`);
+  } catch (e) {
+    console.error(e);
+    alert('Could not send test email: ' + e.message);
+  }
+}
+
+function sendAllAuditEmails() {
+  if (!auditDeadlineText()) { alert('Pick a Deadline date first — it goes into every email.'); return; }
+  const idx = _auditRows.map((r, i) => i).filter(i => _auditRows[i].email && !_auditSent.has(_auditRows[i].rotationId));
+  if (!idx.length) return;
+  if (!confirm(`Send schedule audit emails to ${idx.length} student${idx.length !== 1 ? 's' : ''}?`)) return;
+  sendAuditEmails(idx);
 }
 
 </script>
