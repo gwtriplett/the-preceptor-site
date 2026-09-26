@@ -4853,7 +4853,8 @@ Action needed by ${due}:
 Please adjust your schedule using ONE of these options:
 1. Reply to this email with the dates you would like to cancel.
    OR
-2. Log in to the student portal at thepreceptorsite.netlify.app and request modifications or cancellations there.
+2. Log in to your student portal and request modifications or cancellations there:
+   ${row?.portalLink || (row ? 'https://thepreceptorsite.netlify.app' : '[Student Portal Link]')}
 
 If we do not hear from you by ${due}, TPS may adjust your schedule to match your approved hours so the time can be offered to other students.
 
@@ -4926,7 +4927,10 @@ function previewAuditEmail(i) {
   const email = buildScheduleAuditEmail(r, auditDeadlineText());
   document.getElementById('audit-preview-to').textContent = r.email || '(no email on file)';
   document.getElementById('audit-preview-subject').textContent = email.subject;
+  const deadline = auditEsc(auditDeadlineText());
   document.getElementById('audit-preview-body').innerHTML = auditEsc(email.body)
+    .replace('Audit findings:', '<b>Audit findings:</b>')
+    .split(deadline).join(`<b>${deadline}</b>`)
     .replace(/\[[^\]]+\]/g, m => `<b style="color:var(--red)">${m}</b>`);
   openModal('audit-preview-modal');
 }
@@ -4943,7 +4947,7 @@ async function sendAuditEmails(indexes) {
       body: JSON.stringify({
         staffPassword: staffPasswordEntered,
         action: 'send',
-        emails: rows.map(r => ({ rotationId: r.rotationId, to: r.email, ...buildScheduleAuditEmail(r, deadline) }))
+        emails: rows.map(r => ({ rotationId: r.rotationId, to: r.email, deadline, ...buildScheduleAuditEmail(r, deadline) }))
       })
     });
     const data = await resp.json();
@@ -4965,7 +4969,8 @@ async function sendAuditTestEmail(i) {
   const to = (prompt(`Send ${r.studentName}'s audit email to which address? (the student will NOT receive it)`, saved || 'coordinator@thepreceptorsite.com') || '').trim();
   if (!to) return;
   try { localStorage.setItem('tps_audit_test_email', to); } catch {}
-  const email = buildScheduleAuditEmail(r, auditDeadlineText());
+  const deadline = auditDeadlineText();
+  const email = buildScheduleAuditEmail(r, deadline);
   try {
     const resp = await fetch('/.netlify/functions/schedule-audit', {
       method: 'POST',
@@ -4973,7 +4978,7 @@ async function sendAuditTestEmail(i) {
       body: JSON.stringify({
         staffPassword: staffPasswordEntered,
         action: 'send',
-        emails: [{ rotationId: r.rotationId, to, subject: '[TEST] ' + email.subject, body: email.body }]
+        emails: [{ rotationId: r.rotationId, to, deadline, subject: '[TEST] ' + email.subject, body: email.body }]
       })
     });
     const data = await resp.json();

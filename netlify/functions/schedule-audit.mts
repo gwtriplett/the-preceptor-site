@@ -9,6 +9,7 @@ const ROTATIONS_TABLE = "tbl6l75OeBLNzSp0i";
 const SESSIONS_TABLE = "tblBC5TiAa8VEII9d";
 const STUDENTS_TABLE = "tblesg1u5m2ec3cgg";
 const STUDENT_NAME = "fldVi7kOcEg8BYmxv"; // "Last, First"
+const STUDENT_PORTAL_LINK = "fldUjeEq8Cvl9Pew8"; // direct ?sid= portal link
 
 const R = {
   label: "fldgP4DtHzPosEV5S", // course/placement label, not the student's name
@@ -32,6 +33,17 @@ const S = {
 
 const COUNTED = new Set(["Pending", "Approved", "Completed"]);
 const REPLY_TO = "coordinator@thepreceptorsite.com";
+
+// Plain-text body -> simple HTML: bold the "Audit findings:" heading and the
+// deadline date, make URLs clickable. The plain text is still sent as a fallback.
+function toHtml(text: string, deadline: string): string {
+  const esc = (v: string) => v.replace(/[&<>"]/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]!));
+  let html = esc(text);
+  html = html.replace("Audit findings:", "<b>Audit findings:</b>");
+  if (deadline) html = html.split(esc(deadline)).join(`<b>${esc(deadline)}</b>`);
+  html = html.replace(/https?:\/\/[^\s<]+/g, (u) => `<a href="${u}">${u}</a>`);
+  return `<div style="font-family:Arial,sans-serif;font-size:14px;line-height:1.5;white-space:pre-wrap">${html}</div>`;
+}
 
 function json(body: any, status = 200) {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -88,10 +100,11 @@ async function runAudit(token: string) {
   const [rotations, sessions, students] = await Promise.all([
     fetchAll(token, ROTATIONS_TABLE, Object.values(R)),
     fetchAll(token, SESSIONS_TABLE, Object.values(S)),
-    fetchAll(token, STUDENTS_TABLE, [STUDENT_NAME]),
+    fetchAll(token, STUDENTS_TABLE, [STUDENT_NAME, STUDENT_PORTAL_LINK]),
   ]);
   const sessionsById = new Map(sessions.map((s: any) => [s.id, s.fields]));
   const studentNameById = new Map(students.map((s: any) => [s.id, (s.fields[STUDENT_NAME] || "").toString()]));
+  const portalLinkById = new Map(students.map((s: any) => [s.id, (s.fields[STUDENT_PORTAL_LINK] || "").toString().trim()]));
 
   const flagged: any[] = [];
   const outOfRangeOnly: any[] = [];
@@ -138,6 +151,7 @@ async function runAudit(token: string) {
       rotationId: rot.id,
       studentName: first ? `${first} ${last}` : rawName || "(no name)",
       placementLabel: plain(f[R.label]) || "",
+      portalLink: portalLinkById.get((f[R.student] || [])[0]) || "",
       // Some students have "a@x.com; b@y.com" in one field — send to all of them
       email: (plain(f[R.email]) || "").toString().split(/[;,]/).map((e: string) => e.trim()).filter(Boolean).join(", "),
       startDate: start || "",
@@ -198,7 +212,7 @@ export default async (req: Request, context: Context) => {
         continue;
       }
       try {
-        await transport.sendMail({ from: process.env.GMAIL_USER, to, replyTo: REPLY_TO, subject: e.subject, text: e.body });
+        await transport.sendMail({ from: process.env.GMAIL_USER, to, replyTo: REPLY_TO, subject: e.subject, text: e.body, html: toHtml(e.body, (e.deadline || "").toString()) });
         results.push({ rotationId: e.rotationId || "", to, ok: true });
       } catch (err: any) {
         results.push({ rotationId: e.rotationId || "", to, ok: false, error: err?.message || "Send failed" });
