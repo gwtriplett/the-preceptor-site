@@ -2,6 +2,9 @@ import type { Context, Config } from "@netlify/functions";
 
 const STUDENTS_BASE_ID = "appf6D9Nbhb5Wg43L";
 const MESSAGES_TABLE_ID = "tbltq7GwNZaR4mmUY";
+const SESSIONS_TABLE_ID = "tblBC5TiAa8VEII9d";
+const SESSION_STUDENT_EMAIL = "Student Email";
+const SESSION_CANCEL_REQUESTED = "fldbR1ePMiNBHftnR";
 
 // Public endpoint — the student portal's "Message Coordinator" tab (and the
 // "Request to cancel session" button) POST here so every message lands in
@@ -33,6 +36,7 @@ export default async (req: Request, context: Context) => {
   const studentRecordId = (input.studentRecordId || "").toString().trim();
   const subject = (input.subject || "").toString().trim();
   const message = (input.message || "").toString().trim();
+  const sessionId = (input.sessionId || "").toString().trim();
 
   if (!studentName || !subject || !message) {
     return new Response(JSON.stringify({ error: "Student name, subject, and message are required." }), { status: 400 });
@@ -41,6 +45,29 @@ export default async (req: Request, context: Context) => {
   const token = Netlify.env.get("AIRTABLE_TOKEN");
   if (!token) {
     return new Response(JSON.stringify({ error: "Server is missing AIRTABLE_TOKEN. Set it in Netlify Site settings > Environment variables." }), { status: 500 });
+  }
+
+  // Cancellation requests name a session: flag it so staff see it on the
+  // schedule. Only flag a session that belongs to the requesting student.
+  let linkedSessionId = "";
+  if (/^rec[A-Za-z0-9]{14}$/.test(sessionId) && studentEmail) {
+    try {
+      const sResp = await fetch(`https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${SESSIONS_TABLE_ID}/${sessionId}`, {
+        headers: { Authorization: `Bearer ${token}` },
+      });
+      const sData: any = await sResp.json();
+      const owner = [].concat(sData?.fields?.[SESSION_STUDENT_EMAIL] || []).join(",").toLowerCase();
+      if (sResp.ok && owner.includes(studentEmail.toLowerCase())) {
+        const pResp = await fetch(`https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${SESSIONS_TABLE_ID}/${sessionId}`, {
+          method: "PATCH",
+          headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+          body: JSON.stringify({ fields: { [SESSION_CANCEL_REQUESTED]: true } }),
+        });
+        if (pResp.ok) linkedSessionId = sessionId;
+      }
+    } catch {
+      // Still save the message even if the session couldn't be flagged
+    }
   }
 
   const fields: Record<string, any> = {
@@ -53,6 +80,7 @@ export default async (req: Request, context: Context) => {
     // Only link a real Students record ID — never trust an arbitrary string
     // from the client as a linked-record ID without validating its shape.
     ...(/^rec[A-Za-z0-9]{14}$/.test(studentRecordId) ? { "Student": [studentRecordId] } : {}),
+    ...(linkedSessionId ? { "Session": [linkedSessionId] } : {}),
   };
 
   try {
@@ -68,7 +96,7 @@ export default async (req: Request, context: Context) => {
     if (!resp.ok) {
       return new Response(JSON.stringify({ error: data?.error?.message || "Airtable rejected the message." }), { status: resp.status });
     }
-    return new Response(JSON.stringify({ ok: true, messageId: data?.records?.[0]?.id }), {
+    return new Response(JSON.stringify({ ok: true, messageId: data?.records?.[0]?.id, sessionFlagged: !!linkedSessionId }), {
       status: 200,
       headers: { "Content-Type": "application/json" },
     });

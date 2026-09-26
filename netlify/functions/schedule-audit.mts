@@ -28,6 +28,7 @@ const S = {
   hours: "fldbQW9Ey797A0PHd",
   status: "fldALyzGgGJ6QO2Na",
   rotation: "fldNU8dYFasDntYGx",
+  cancelRequested: "fldbR1ePMiNBHftnR",
 };
 
 const COUNTED = new Set(["Pending", "Approved", "Completed"]);
@@ -114,6 +115,7 @@ async function runAudit(token: string) {
       label: `${fmtDate(s[S.date])} ${fmtTime(s[S.start])}–${fmtTime(s[S.end])}`,
       hours: num(s[S.hours]),
       status: plain(s[S.status]),
+      cancelRequested: !!s[S.cancelRequested],
     });
 
     // The session that crosses the goal and every session after it are affected;

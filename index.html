@@ -720,6 +720,16 @@
 
   <div id="risk-banner-container"></div>
 
+  <!-- CANCELLATION REQUESTS (hidden when there are none) -->
+  <div class="card" id="cancel-requests-card" style="display:none;margin-bottom:16px;border:1.5px solid var(--amber)">
+    <div class="section-head"><span class="section-title">⚑ Cancellation requests (<span id="cancel-requests-count">0</span>)</span></div>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:10px">Students asked to cancel these sessions from their portal. Approve sets the session to Denied with a "Cancelled at student request" note (so it stops counting toward hours); Decline keeps the session. Either way a reply opens in Gmail for you to send.</p>
+    <div class="tbl-wrap"><table style="width:100%">
+      <thead><tr><th>Student</th><th>Session</th><th>Hours</th><th>Status</th><th></th></tr></thead>
+      <tbody id="cancel-requests-tbody"></tbody>
+    </table></div>
+  </div>
+
   <div class="tabs">
     <div class="tab active" onclick="setTab('pending', this)">Pending Approval</div>
     <div class="tab" onclick="setTab('approved', this)">Approved Sessions</div>
@@ -1886,6 +1896,7 @@ async function loadSessions() {
   allSessions = all.map(r => ({ id: r.id, ...r.fields }));
   updateStats(allSessions);
   renderTable();
+  renderCancelRequests();
 }
 
 // ── STATS ─────────────────────────────────────────────
@@ -1957,7 +1968,7 @@ function renderTable() {
       <td style="white-space:nowrap;font-size:12px">${s['Start Time'] || '—'} – ${s['End Time'] || '—'}</td>
       <td style="font-weight:600">${s['Hours This Session'] || '—'}</td>
       <td style="max-width:160px;font-size:12px;color:var(--text-muted)">${s['Clinical Focus'] || '—'}</td>
-      <td><span class="badge ${badgeClass}">${status}</span></td>
+      <td><span class="badge ${badgeClass}">${status}</span>${s['Cancellation Requested'] && (status === 'Pending' || status === 'Approved') ? '<div style="font-size:11px;color:var(--amber);font-weight:700;margin-top:3px">⚑ Cancel requested</div>' : ''}</td>
       <td>
         <div class="progress-wrap">
           <div class="progress-bar-bg"><div class="progress-bar-fill ${fillClass}" style="width:${pct}%"></div></div>
@@ -3104,11 +3115,15 @@ async function lookupStudent() {
       ? `<div class="approved-indicator" style="color:var(--green);margin-bottom:4px"><span class="dot dot-green"></span>Cleared to show up</div>`
       : status === 'Pending'
       ? `<div class="approved-indicator" style="color:var(--amber);margin-bottom:4px"><span class="dot dot-yellow"></span>Awaiting approval</div>`
+      : status === 'Denied' && String(s['Preceptor Notes'] || '').startsWith('Cancelled at student request')
+      ? `<div class="approved-indicator" style="color:var(--text-muted);margin-bottom:4px"><span class="dot dot-red"></span>Cancelled at your request</div>`
       : status === 'Denied'
       ? `<div class="approved-indicator" style="color:var(--red);margin-bottom:4px"><span class="dot dot-red"></span>Not approved — contact coordinator</div>`
       : '';
     const cancelBtn = (status === 'Approved' || status === 'Pending')
-      ? `<button class="cancel-session-btn" onclick="requestCancelSession('${s.id}','${formatDate(s['Session Date'])}','${(s['Clinical Focus']||'').replace(/'/g,"\'")}')">Request cancellation</button>`
+      ? (s['Cancellation Requested']
+        ? `<div style="font-size:11px;color:var(--amber);font-weight:600;margin-top:6px">⏳ Cancellation requested — waiting for your coordinator</div>`
+        : `<button class="cancel-session-btn" onclick="requestCancelSession('${s.id}','${formatDate(s['Session Date'])}','${(s['Clinical Focus']||'').replace(/'/g,"\'")}', this)">Request cancellation</button>`)
       : '';
     const checklist = ''; // Pre-session checklist disabled for now
     return `<div class="session-card">
@@ -3383,7 +3398,7 @@ Please review and update their record in Airtable.`
 // Coordinator Messages table in Airtable via this public endpoint, and —
 // when a coordinator email is configured — also still emailed, so nothing
 // depends on remembering to check Airtable.
-async function submitCoordinatorMessage(subject, message) {
+async function submitCoordinatorMessage(subject, message, sessionId) {
   try {
     const resp = await fetch('/.netlify/functions/message-submit', {
       method: 'POST',
@@ -3392,7 +3407,8 @@ async function submitCoordinatorMessage(subject, message) {
         studentName: window._studentPortalName || '',
         studentEmail: window._studentPortalEmail || '',
         studentRecordId: window._studentPortalRecordId || '',
-        subject, message
+        subject, message,
+        sessionId: sessionId || ''
       })
     });
     const data = await resp.json();
@@ -3435,24 +3451,16 @@ Reply directly to the student at: ${window._studentPortalEmail}
 }
 
 // ── SESSION CANCELLATION ──────────────────────────────
-function requestCancelSession(sessionId, sessionDate, sessionFocus) {
-  if (!confirm(`Request to cancel your session on ${sessionDate}?\n\nThis will notify your coordinator — do not assume the session is cancelled until you hear back.`)) return;
-  submitCoordinatorMessage('Session cancellation request', `Requested cancellation of the session on ${sessionDate}${sessionFocus ? ` (Clinical Focus: ${sessionFocus})` : ''}. Please update the session status in the scheduler and reply to confirm.`);
-  const cfg = getEmailConfig();
-  if (hasValidCoordinatorEmail(cfg)) {
-    sendEmailViaClaudeAPI(cfg.fromEmail,
-      `Session cancellation request — ${window._studentPortalName} — ${sessionDate}`,
-      `${window._studentPortalName} has requested to cancel a session.
-
-Session Date: ${sessionDate}
-Clinical Focus: ${sessionFocus}
-Student Email: ${window._studentPortalEmail}
-
-Please update the session status in the scheduler and reply to confirm the cancellation.
-
-(This request has also been saved to the Coordinator Messages table in Airtable.)`
-    );
+async function requestCancelSession(sessionId, sessionDate, sessionFocus, btn) {
+  if (!confirm(`Request to cancel your session on ${sessionDate}?\n\nYour coordinator will review the request. Do not assume the session is cancelled until you hear back.`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
+  const ok = await submitCoordinatorMessage('Session cancellation request', `Requested cancellation of the session on ${sessionDate}${sessionFocus ? ` (Clinical Focus: ${sessionFocus})` : ''}.`, sessionId);
+  if (!ok) {
+    if (btn) { btn.disabled = false; btn.textContent = 'Request cancellation'; }
+    alert('Sorry — your request could not be sent. Please try again, or reply to any email from your coordinator.');
+    return;
   }
+  if (btn) btn.outerHTML = `<div style="font-size:11px;color:var(--amber);font-weight:600;margin-top:6px">⏳ Cancellation requested — waiting for your coordinator</div>`;
   showEmailToast('Cancellation request sent to your coordinator. Do not assume the session is cancelled until you receive confirmation.', 'warn');
 }
 
@@ -4901,7 +4909,7 @@ function renderAuditTable() {
         <td>${r.hoursGoal}</td>
         <td>${r.scheduledTotal}${r.priorHours ? `<div style="font-size:11px;color:var(--text-muted)">incl. ${r.priorHours} prior</div>` : ''}</td>
         <td style="color:var(--red);font-weight:700">${r.hoursOver}</td>
-        <td style="font-size:12px">${r.datesAffected.map(d => `${auditEsc(d.label)} <span style="color:var(--text-muted)">(${auditEsc(d.status)})</span>`).join('<br>') || '<span style="color:var(--text-muted)">—</span>'}</td>
+        <td style="font-size:12px">${r.datesAffected.map(d => `${auditEsc(d.label)} <span style="color:var(--text-muted)">(${auditEsc(d.status)})</span>${d.cancelRequested ? ' <span style="color:var(--amber);font-weight:700">⚑ cancel requested</span>' : ''}`).join('<br>') || '<span style="color:var(--text-muted)">—</span>'}</td>
         <td style="font-size:12px;color:var(--amber)">${r.outOfRange.length ? '⚠ Outside dates:<br>' + r.outOfRange.map(d => auditEsc(d.label)).join('<br>') : ''}</td>
         <td style="white-space:nowrap">
           <button class="btn btn-sm" onclick="previewAuditEmail(${i})">Preview</button>
@@ -4946,6 +4954,81 @@ function openAuditEmail(i) {
 function openNextAuditEmail() {
   const i = _auditRows.findIndex(r => r.email && !_auditSent.has(r.rotationId));
   if (i >= 0) openAuditEmail(i);
+}
+
+// ══════════════════════════════════════════════════════════════
+// CANCELLATION REQUESTS
+// ══════════════════════════════════════════════════════════════
+const CANCEL_MESSAGES_TABLE_ID = 'tbltq7GwNZaR4mmUY';
+
+function cancelRequestSessions() {
+  return allSessions
+    .filter(s => s['Cancellation Requested'] && (s['Approval Status'] === 'Pending' || s['Approval Status'] === 'Approved'))
+    .sort((a, b) => (a['Session Date'] || '').localeCompare(b['Session Date'] || ''));
+}
+
+function renderCancelRequests() {
+  const card = document.getElementById('cancel-requests-card');
+  if (!card) return;
+  const rows = cancelRequestSessions();
+  card.style.display = rows.length ? 'block' : 'none';
+  document.getElementById('cancel-requests-count').textContent = rows.length;
+  document.getElementById('cancel-requests-tbody').innerHTML = rows.map(s => `<tr>
+    <td><div style="font-weight:600">${escapeHtml(s['Student Name'] || '—')}</div><div style="font-size:11px;color:var(--text-muted)">${escapeHtml(s['Student Email'] || '')}</div></td>
+    <td style="font-size:12px">${formatDate(s['Session Date'])}<div style="color:var(--text-muted)">${escapeHtml(s['Start Time'] || '—')} – ${escapeHtml(s['End Time'] || '—')}</div></td>
+    <td>${s['Hours This Session'] || '—'}</td>
+    <td><span class="badge ${s['Approval Status'] === 'Approved' ? 'badge-approved' : 'badge-pending'}">${s['Approval Status']}</span></td>
+    <td style="white-space:nowrap">
+      <button class="btn btn-success btn-sm" onclick="resolveCancelRequest('${s.id}', true)">✓ Approve cancellation</button>
+      <button class="btn btn-sm" onclick="resolveCancelRequest('${s.id}', false)">Decline</button>
+    </td>
+  </tr>`).join('');
+}
+
+async function resolveCancelRequest(id, approve) {
+  const s = allSessions.find(x => x.id === id);
+  if (!s) return;
+  const dateStr = formatDate(s['Session Date']);
+  if (!confirm(approve
+    ? `Cancel ${s['Student Name']}'s session on ${dateStr}?\n\nThe session will be set to Denied ("Cancelled at student request") and a confirmation email will open in Gmail.`
+    : `Decline the cancellation request? ${s['Student Name']}'s session on ${dateStr} will stay on the schedule and a reply will open in Gmail.`)) return;
+
+  const today = new Date().toISOString().split('T')[0];
+  const fields = approve
+    ? { 'Approval Status': 'Denied', 'Cancellation Requested': false, 'Preceptor Notes': `Cancelled at student request (${formatDate(today)})` }
+    : { 'Cancellation Requested': false };
+  const res = await airtableRequest('PATCH', `/${id}`, { fields });
+  if (!res || res.error) { alert('Could not update the session: ' + (res?.error?.message || res?.error || 'unknown error')); return; }
+
+  // Mark the matching Coordinator Messages as Resolved (best effort)
+  try {
+    const formula = encodeURIComponent(`AND({Status}!='Resolved', FIND('${id}', ARRAYJOIN({Session})))`);
+    const msgs = await atRead(STUDENTS_BASE_ID, CANCEL_MESSAGES_TABLE_ID, `?filterByFormula=${formula}`);
+    const records = (msgs?.records || []).map(r => ({ id: r.id, fields: { 'Status': 'Resolved' } }));
+    if (records.length) await atWrite(STUDENTS_BASE_ID, CANCEL_MESSAGES_TABLE_ID, 'PATCH', '', { records: records.slice(0, 10) });
+  } catch (e) { console.error('Could not resolve coordinator message:', e); }
+
+  const first = String(s['Student Name'] || '').includes(',') ? String(s['Student Name']).split(',')[1].trim() : String(s['Student Name'] || '').split(' ')[0];
+  const subject = approve
+    ? `Session Cancelled: ${dateStr} – The Preceptor Site`
+    : `Your Cancellation Request for ${dateStr} – The Preceptor Site`;
+  const body = `Hi ${first || 'there'},
+
+${approve
+  ? `Your cancellation request has been approved. Your clinical session on ${dateStr} (${s['Start Time'] || '—'} – ${s['End Time'] || '—'}) has been cancelled and removed from your schedule. Please do not come in on that date.`
+  : `We received your request to cancel your clinical session on ${dateStr} (${s['Start Time'] || '—'} – ${s['End Time'] || '—'}). At this time the session remains on your schedule, so please plan to attend. If you have questions, simply reply to this email.`}
+
+Warm regards,
+
+Gerald Triplett
+Preceptorship Coordinator
+
+The Preceptor Site | a division of TMM Medical Group
+3520 High Street, Suite 100, Portsmouth, VA 23707
+coordinator@thepreceptorsite.com | 757-977-9675`;
+  const to = String(s['Student Email'] || '').split(/[;,]/).map(e => e.trim()).filter(Boolean).join(', ');
+  window.open('https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(to) + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body), '_blank');
+  await loadSessions();
 }
 
 </script>
