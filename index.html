@@ -1778,7 +1778,7 @@ function showEmailPanel(toEmail, subject, bodyText) {
   toast.id = 'email-toast';
   toast.style.cssText = 'position:fixed;bottom:20px;right:20px;width:400px;background:var(--white);border:1px solid var(--gray-100);border-radius:12px;z-index:9999;overflow:hidden;box-shadow:0 4px 24px rgba(0,0,0,0.10);';
   const preview = bodyText.substring(0, 350) + (bodyText.length > 350 ? '...' : '');
-  const mailtoLink = 'mailto:' + encodeURIComponent(toEmail) + '?subject=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(bodyText);
+  const mailtoLink = 'https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(toEmail) + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(bodyText);
   // Subject/preview/toEmail are escaped before going into innerHTML — and the
   // Copy button's click handler is bound below (not inlined as an onclick
   // attribute), since embedding arbitrary message text inside an HTML
@@ -1799,7 +1799,7 @@ function showEmailPanel(toEmail, subject, bodyText) {
       <div style="font-size:12px;color:var(--text-muted);line-height:1.6;max-height:110px;overflow:hidden;border:1px solid var(--gray-100);border-radius:6px;padding:10px;background:var(--gray-50);white-space:pre-wrap">${escapeHtml(preview)}</div>
       <div style="margin-top:12px;display:flex;gap:8px">
         <button class="email-toast-copy-btn" style="flex:1;padding:7px;border:1px solid var(--gray-100);background:var(--white);border-radius:6px;font-size:12px;cursor:pointer;font-family:inherit">Copy</button>
-        <a href="${mailtoLink}" style="flex:1;padding:7px;background:var(--blue);color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-decoration:none;text-align:center;display:flex;align-items:center;justify-content:center">Open in Mail</a>
+        <a href="${mailtoLink}" target="_blank" rel="noopener" style="flex:1;padding:7px;background:var(--blue);color:white;border:none;border-radius:6px;font-size:12px;cursor:pointer;text-decoration:none;text-align:center;display:flex;align-items:center;justify-content:center">Open in Gmail</a>
       </div>
     </div>`;
   const copyBtn = toast.querySelector('.email-toast-copy-btn');
