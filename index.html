@@ -5009,14 +5009,15 @@ async function resolveCancelRequest(id, approve) {
   const res = await airtableRequest('PATCH', `/${id}`, { fields, typecast: true });
   if (!res || res.error) { alert('Could not update the session: ' + (res?.error?.message || res?.error || 'unknown error')); return; }
 
-  // Mark the matching Coordinator Messages as Resolved (best effort)
+  // Mark the session's linked Coordinator Messages as Resolved (best effort)
   try {
-    const formula = encodeURIComponent(`AND({Status}!='Resolved', FIND('${id}', ARRAYJOIN({Session})))`);
-    const msgs = await atRead(STUDENTS_BASE_ID, CANCEL_MESSAGES_TABLE_ID, `?filterByFormula=${formula}`);
-    const records = (msgs?.records || []).map(r => ({ id: r.id, fields: { 'Status': 'Resolved' } }));
-    if (records.length) await atWrite(STUDENTS_BASE_ID, CANCEL_MESSAGES_TABLE_ID, 'PATCH', '', { records: records.slice(0, 10) });
+    const rec = await atRead(BASE_ID, TABLE_ID, `/${id}?returnFieldsByFieldId=true`);
+    const msgIds = rec?.fields?.['fldDVuIVY7Sqd6R63'] || []; // Sessions → Coordinator Messages link
+    const records = msgIds.slice(0, 10).map(mid => ({ id: mid, fields: { 'Status': 'Resolved' } }));
+    if (records.length) await atWrite(STUDENTS_BASE_ID, CANCEL_MESSAGES_TABLE_ID, 'PATCH', '', { records });
   } catch (e) { console.error('Could not resolve coordinator message:', e); }
 
+  const fmt12 = t => { const m = /^(\d{1,2}):(\d{2})$/.exec(String(t || '').trim()); if (!m) return t || '—'; const h = +m[1]; return `${((h + 11) % 12) + 1}:${m[2]} ${h < 12 ? 'AM' : 'PM'}`; };
   const first = String(s['Student Name'] || '').includes(',') ? String(s['Student Name']).split(',')[1].trim() : String(s['Student Name'] || '').split(' ')[0];
   const subject = approve
     ? `Session Cancelled: ${dateStr} – The Preceptor Site`
@@ -5024,8 +5025,8 @@ async function resolveCancelRequest(id, approve) {
   const body = `Hi ${first || 'there'},
 
 ${approve
-  ? `Your cancellation request has been approved. Your clinical session on ${dateStr} (${s['Start Time'] || '—'} – ${s['End Time'] || '—'}) has been cancelled and removed from your schedule. Please do not come in on that date.`
-  : `We received your request to cancel your clinical session on ${dateStr} (${s['Start Time'] || '—'} – ${s['End Time'] || '—'}). At this time the session remains on your schedule, so please plan to attend. If you have questions, simply reply to this email.`}
+  ? `Your cancellation request has been approved. Your clinical session on ${dateStr} (${fmt12(s['Start Time'])} – ${fmt12(s['End Time'])}) has been cancelled and removed from your schedule. Please do not come in on that date.`
+  : `We received your request to cancel your clinical session on ${dateStr} (${fmt12(s['Start Time'])} – ${fmt12(s['End Time'])}). At this time the session remains on your schedule, so please plan to attend. If you have questions, simply reply to this email.`}
 
 Warm regards,
 
