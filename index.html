@@ -1375,12 +1375,11 @@
     <div class="section-head">
       <span class="section-title">Schedule audit</span>
       <div style="display:flex;gap:8px;align-items:center">
-        <label style="font-size:12px;color:var(--text-muted)">Deadline <input type="date" id="audit-deadline" style="font-family:inherit;font-size:12px;padding:4px 6px"></label>
         <button class="btn btn-sm" onclick="runScheduleAudit()">Run Audit</button>
         <button class="btn btn-primary btn-sm" id="audit-send-all-btn" style="display:none" onclick="sendAllAuditEmails()">✉ Send All (<span id="audit-unsent-count">0</span>)</button>
       </div>
     </div>
-    <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Finds rotations (not Released) whose Prior Hours + Pending/Approved/Completed sessions exceed the Hours Goal. Denied and No Show sessions are not counted. Review each email before sending — nothing is sent automatically.</p>
+    <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Finds rotations (not Released) whose Prior Hours + Pending/Approved/Completed sessions exceed the Hours Goal. Denied and No Show sessions are not counted. The deadline in each email is three business days after the day it is sent. Review each email before sending — nothing is sent automatically.</p>
     <div id="audit-summary" style="font-size:12px;color:var(--text-muted);margin-bottom:8px"></div>
     <div class="tbl-wrap">
       <table style="width:100%">
@@ -4817,10 +4816,15 @@ function auditFmtDate(iso) {
   const [y, m, d] = iso.slice(0, 10).split('-');
   return `${m}/${d}/${y}`;
 }
+// Deadline is always three business days (Mon–Fri) after the day the email is sent.
 function auditDeadlineText() {
-  const v = document.getElementById('audit-deadline')?.value;
-  if (!v) return '';
-  return new Date(v + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  const d = new Date();
+  let added = 0;
+  while (added < 3) {
+    d.setDate(d.getDate() + 1);
+    if (d.getDay() !== 0 && d.getDay() !== 6) added++;
+  }
+  return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
 }
 
 // Shared by the audit table and the email composer. Missing values stay as
@@ -4929,7 +4933,6 @@ function previewAuditEmail(i) {
 
 async function sendAuditEmails(indexes) {
   const deadline = auditDeadlineText();
-  if (!deadline) { alert('Pick a Deadline date first — it goes into every email.'); return; }
   const rows = indexes.map(i => _auditRows[i]).filter(r => r && r.email && !_auditSent.has(r.rotationId));
   if (!rows.length) return;
   if (rows.length === 1 && !confirm(`Send the schedule audit email to ${rows[0].studentName} (${rows[0].email})?`)) return;
@@ -4984,7 +4987,6 @@ async function sendAuditTestEmail(i) {
 }
 
 function sendAllAuditEmails() {
-  if (!auditDeadlineText()) { alert('Pick a Deadline date first — it goes into every email.'); return; }
   const idx = _auditRows.map((r, i) => i).filter(i => _auditRows[i].email && !_auditSent.has(_auditRows[i].rotationId));
   if (!idx.length) return;
   if (!confirm(`Send schedule audit emails to ${idx.length} student${idx.length !== 1 ? 's' : ''}?`)) return;
