@@ -4907,6 +4907,7 @@ function renderAuditTable() {
         <td style="font-size:12px;color:var(--amber)">${r.outOfRange.length ? '⚠ Outside dates:<br>' + r.outOfRange.map(d => auditEsc(d.label)).join('<br>') : ''}</td>
         <td style="white-space:nowrap">
           <button class="btn btn-sm" onclick="previewAuditEmail(${i})">Preview</button>
+          <button class="btn btn-sm" onclick="sendAuditTestEmail(${i})" title="Send this student's email to your own address instead">Test to me</button>
           ${_auditSent.has(r.rotationId) ? '<span style="color:var(--green);font-weight:700;margin-left:6px">✓ Sent</span>' : `<button class="btn btn-primary btn-sm" onclick="sendAuditEmails([${i}])" ${r.email ? '' : 'disabled'}>Send</button>`}
         </td>
       </tr>`).join('');
@@ -4951,6 +4952,34 @@ async function sendAuditEmails(indexes) {
   } catch (e) {
     console.error(e);
     alert('Could not send emails: ' + e.message);
+  }
+}
+
+async function sendAuditTestEmail(i) {
+  const r = _auditRows[i];
+  let saved = '';
+  try { saved = localStorage.getItem('tps_audit_test_email') || ''; } catch {}
+  const to = (prompt(`Send ${r.studentName}'s audit email to which address? (the student will NOT receive it)`, saved || 'coordinator@thepreceptorsite.com') || '').trim();
+  if (!to) return;
+  try { localStorage.setItem('tps_audit_test_email', to); } catch {}
+  const email = buildScheduleAuditEmail(r, auditDeadlineText());
+  try {
+    const resp = await fetch('/.netlify/functions/schedule-audit', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        staffPassword: staffPasswordEntered,
+        action: 'send',
+        emails: [{ rotationId: r.rotationId, to, subject: '[TEST] ' + email.subject, body: email.body }]
+      })
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
+    const res = (data.results || [])[0];
+    alert(res?.ok ? `Test email sent to ${to}.` : `Test failed: ${res?.error || 'unknown error'}`);
+  } catch (e) {
+    console.error(e);
+    alert('Could not send test email: ' + e.message);
   }
 }
 
