@@ -1349,7 +1349,7 @@
   <div class="card" style="margin-bottom:16px">
     <div class="section-head">
       <span class="section-title">Student portal access</span>
-      <button class="btn btn-primary btn-sm" id="portal-access-send-btn" style="display:none" onclick="sendPortalAccessEmails()">✉ Send Selected (<span id="portal-access-count">0</span>)</button>
+      <button class="btn btn-primary btn-sm" id="portal-access-send-btn" style="display:none" onclick="sendPortalAccessEmails()">✉ Open Next in Gmail (<span id="portal-access-count">0</span> left)</button>
     </div>
     <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">Email students the scheduler link and how to log in — no password needed, just their email address or Student ID.</p>
     <div class="tbl-wrap">
@@ -3867,39 +3867,31 @@ function updatePortalAccessUI() {
   }
 }
 
-async function sendPortalAccessEmails() {
-  const students = Array.from(selectedPortalIds)
-    .map(id => studentDirectory.find(s => s.id === id))
-    .filter(s => s && s['Email']);
-  if (students.length === 0) { alert('No students with an email address are selected.'); return; }
-
-  const missingEmail = Array.from(selectedPortalIds).length - students.length;
-  const confirmMsg = `Send portal access emails to ${students.length} student${students.length !== 1 ? 's' : ''}?` +
-    (missingEmail > 0 ? `\n(${missingEmail} selected student${missingEmail !== 1 ? 's have' : ' has'} no email on file and will be skipped.)` : '');
-  if (!confirm(confirmMsg)) return;
-
-  try {
-    const resp = await fetch('/.netlify/functions/send-portal-access-emails', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        staffPassword: staffPasswordEntered,
-        students: students.map(s => ({ name: s['Student Name'] || 'Student', email: s['Email'], studentId: s['Student ID'] || '' }))
-      })
-    });
-    const data = await resp.json();
-    if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
-    selectedPortalIds.clear();
-    renderPortalAccessList();
-    if (data.failed && data.failed.length > 0) {
-      alert(`Sent ${data.sent} email${data.sent !== 1 ? 's' : ''}. ${data.failed.length} failed:\n` + data.failed.map(f => `${f.email || '(missing email)'}: ${f.error}`).join('\n'));
-    } else {
-      alert(`Sent ${data.sent} portal access email${data.sent !== 1 ? 's' : ''}.`);
-    }
-  } catch (e) {
-    console.error(e);
-    alert('Could not send emails: ' + e.message);
-  }
+// Same as the Revenue tab's student emails: open a pre-filled Gmail compose
+// window for review. Browsers allow one new window per click, so each click
+// opens the next selected student and removes them from the selection.
+function sendPortalAccessEmails() {
+  const ids = Array.from(selectedPortalIds);
+  const s = ids.map(id => studentDirectory.find(x => x.id === id)).find(x => x && x['Email']);
+  if (!s) { alert('No students with an email address are selected.'); return; }
+  const name = s['Student Name'] || 'Student';
+  const email = String(s['Email']).split(/[;,]/).map(e => e.trim()).filter(Boolean).join(', ');
+  const studentId = s['Student ID'] || '';
+  const link = studentId ? `https://thepreceptorsite.netlify.app/?sid=${encodeURIComponent(studentId)}` : PORTAL_URL;
+  const loginOptions = studentId
+    ? `- Your email address: ${email}\n- Or your Student ID: ${studentId}`
+    : `- Your email address: ${email}`;
+  const subject = 'Your Clinical Hours Scheduler Access — The Preceptor Site';
+  const body = `Dear ${name},\n\nYou can now access your clinical hours scheduler online at:\n${link}\n\nOn the login screen, select "Student" and log in with either:\n${loginOptions}\n\nNo password is needed.\n\nFrom your portal you can:\n- Request and view your clinical sessions\n- Track your completed hours toward your requirement\n- Submit required documents\n- Update your contact information\n- Let your coordinator know about upcoming unavailable dates\n\nQuestions? Just reply to this email.\n\nWarm regards,\n\nGerald Triplett\nPreceptorship Coordinator\n\nThe Preceptor Site | a division of TMM Medical Group\n3520 High Street, Suite 100, Portsmouth, VA 23707\ncoordinator@thepreceptorsite.com | 757-977-9675`;
+  const url = 'https://mail.google.com/mail/?view=cm&fs=1' +
+    '&to=' + encodeURIComponent(email) +
+    '&su=' + encodeURIComponent(subject) +
+    '&body=' + encodeURIComponent(body);
+  window.open(url, '_blank');
+  selectedPortalIds.delete(s.id);
+  // Drop any selected students with no email so the count only reflects openable drafts
+  ids.forEach(id => { const x = studentDirectory.find(y => y.id === id); if (!x || !x['Email']) selectedPortalIds.delete(id); });
+  renderPortalAccessList();
 }
 
 // ══════════════════════════════════════════════════════════════
