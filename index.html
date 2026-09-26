@@ -4836,7 +4836,7 @@ function buildScheduleAuditEmail(row, deadline, fallbackName) {
     ? (row.datesAffected.length ? '\n' + row.datesAffected.map(d => `   • ${d.label}`).join('\n') : 'None of your upcoming sessions (the extra hours come from sessions already completed)')
     : '[Dates Affected]';
   return {
-    subject: 'Action Needed: Schedule Audit Results – The Preceptor Site',
+    subject: `Action Needed: ${name} - Preceptor/Clinical Schedule Audit Results – The Preceptor Site`,
     body: `Dear ${name},
 
 The Preceptor Site (TPS) routinely audits the clinical schedule to ensure hours requests are accurate and that clinical time is available for every student in the program.
@@ -4862,10 +4862,11 @@ If you believe this finding is an error, please reply to this email and we will 
 
 Thank you for your prompt attention.
 
-Sincerely,
+Warm regards,
 
-Trip Triplett
+Gerald Triplett
 Preceptorship Coordinator
+
 The Preceptor Site | a division of TMM Medical Group
 3520 High Street, Suite 100, Portsmouth, VA 23707
 coordinator@thepreceptorsite.com | 757-977-9675`
