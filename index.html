@@ -3916,7 +3916,7 @@ async function renderRevenuePage() {
       const admStatus = multiSelectText(r['Admission Status']) || '—';
       const rotLabel  = [r['Course Name'], r['Semester / Quarter']].filter(Boolean).join(' · ') || r['Placement Label'] || 'Rotation';
       const balColor  = fullyPaid ? 'var(--green)' : partPaid ? 'var(--amber)' : balance > 0 ? 'var(--red)' : 'var(--text-muted)';
-      const uni       = s['University / College'] || r['College/University'] || '';
+      const uni       = s['University / College'] || '';
 
       return `<tr${firstOfStudent ? ' style="border-top:2px solid var(--gray-100)"' : ''}>
         <td>

@@ -68,6 +68,16 @@ export default async (req: Request, context: Context) => {
     if (studentEmail && recordEmail && recordEmail !== studentEmail.toLowerCase()) {
       return new Response(JSON.stringify({ error: "Student profile mismatch — please look yourself up again and retry." }), { status: 400 });
     }
+    // University lives on the Student record (Rotations show it via lookup).
+    // Fill it in from this form only if the Student record doesn't have one
+    // yet — never overwrite what staff already have on file.
+    if (university && !(checkData?.fields?.["University / College"] || "").toString().trim()) {
+      await fetch(`https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${STUDENTS_TABLE_ID}/${studentRecordId}`, {
+        method: "PATCH",
+        headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
+        body: JSON.stringify({ fields: { "University / College": university } }),
+      }).catch(() => {});
+    }
   } catch (err: any) {
     return new Response(JSON.stringify({ error: "Could not verify your student profile. Please try again." }), { status: 502 });
   }
@@ -75,7 +85,6 @@ export default async (req: Request, context: Context) => {
   const rotationFields: Record<string, any> = {
     "Student": [studentRecordId],
     "Semester / Quarter": semesterQuarter,
-    "College/University": university,
     "Course Name": courseName,
     "Requested Start Date": startDate,
     "Requested End Date": endDate,

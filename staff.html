@@ -191,7 +191,7 @@ async function loadSubmissions(){
             ...sf,
             'First Name': sf['First Name'] || (rf['Placement Label'] || '').split(', ')[1] || '',
             'Last Name': sf['Last Name'] || (rf['Placement Label'] || '').split(', ')[0] || '',
-            'University / College': rf['College/University'] || sf['University / College'],
+            'University / College': sf['University / College'],
             'Requested Start Date': rf['Requested Start Date'],
             'Requested End Date': rf['Requested End Date'],
             'Total Hours Required': rf['Hours Goal'],

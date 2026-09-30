@@ -149,7 +149,8 @@ export default async (req: Request, context: Context) => {
       "Placement Label": studentName,
       "Student": studentRecordId ? [studentRecordId] : undefined,
       "Semester / Quarter": semesterQuarter,
-      "College/University": (input.university || "").toString().trim(),
+      // University, Intake Source, Degree / Program and Student ID show on the
+      // Rotation via lookup fields from the linked Student — not copied here.
       "Course Name": courseName,
       "Hours Goal": Number(input.hoursRequired) || null,
       "Requested Start Date": startDate || null,
