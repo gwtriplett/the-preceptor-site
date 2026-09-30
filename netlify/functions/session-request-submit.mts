@@ -5,6 +5,8 @@ const SESSIONS_TABLE_ID = "tblBC5TiAa8VEII9d";
 const STUDENTS_BASE_ID = "appf6D9Nbhb5Wg43L";
 const STUDENTS_TABLE_ID = "tblesg1u5m2ec3cgg";
 const ROTATIONS_TABLE_ID = "tbl6l75OeBLNzSp0i";
+const SETTINGS_TABLE_ID = "tblWrhu0Macqnjt3H";
+const DEFAULT_CAPACITY_LIMIT = 4;
 
 // A rotation is only open for new session requests once it's actually paid
 // for and underway — matches the Rotations table's Pipeline Status choices.
@@ -289,6 +291,64 @@ export default async (req: Request, context: Context) => {
     }
   } catch {
     // Non-fatal — if the duplicate check itself fails, fall through and allow submission.
+  }
+
+  // Daily capacity — the limit lives in the Airtable Settings table so staff
+  // can change it without a redeploy. Only Confirmed seats count (Rotations
+  // "Seat Status"); Standby and Released don't take a seat. Sessions with no
+  // linked rotation (legacy rows) count as Confirmed, same as the calendar.
+  try {
+    const authHeaders = { Authorization: `Bearer ${token}` };
+    let capacityLimit = DEFAULT_CAPACITY_LIMIT;
+    const setResp = await fetch(`https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${SETTINGS_TABLE_ID}?maxRecords=1`, { headers: authHeaders });
+    const setData: any = await setResp.json();
+    const configured = setData?.records?.[0]?.fields?.["Daily Capacity Limit"];
+    if (setResp.ok && typeof configured === "number" && configured > 0) capacityLimit = configured;
+
+    const capDates = [...new Set(validRows.map((r: any) => (r.date || "").toString()))];
+    const capFormula = `AND(OR(${capDates.map((d) => `DATESTR({Session Date})="${d}"`).join(",")}), OR({Approval Status}="Pending",{Approval Status}="Approved",{Approval Status}="Completed"))`;
+    let daySessions: any[] = [];
+    let offset = "";
+    do {
+      const url = `https://api.airtable.com/v0/${SESSIONS_BASE_ID}/${SESSIONS_TABLE_ID}?filterByFormula=${encodeURIComponent(capFormula)}&fields[]=${encodeURIComponent("Session Date")}&fields[]=Rotation${offset ? "&offset=" + offset : ""}`;
+      const resp = await fetch(url, { headers: authHeaders });
+      const data: any = await resp.json();
+      if (!resp.ok) throw new Error("capacity lookup failed");
+      daySessions = daySessions.concat(data?.records || []);
+      offset = data?.offset || "";
+    } while (offset);
+
+    const linkedRotationIds = [...new Set(daySessions.flatMap((s) => (s.fields?.["Rotation"] || []) as string[]))];
+    const seatStatus: Record<string, string> = {};
+    for (let i = 0; i < linkedRotationIds.length; i += 50) {
+      const chunk = linkedRotationIds.slice(i, i + 50);
+      const f = `OR(${chunk.map((id) => `RECORD_ID()="${id}"`).join(",")})`;
+      const resp = await fetch(`https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${ROTATIONS_TABLE_ID}?filterByFormula=${encodeURIComponent(f)}&fields[]=${encodeURIComponent("Seat Status")}`, { headers: authHeaders });
+      const data: any = await resp.json();
+      if (!resp.ok) throw new Error("seat status lookup failed");
+      (data?.records || []).forEach((r: any) => { seatStatus[r.id] = r.fields?.["Seat Status"] || ""; });
+    }
+    const isConfirmed = (s: any) => {
+      const rid = (s.fields?.["Rotation"] || [])[0];
+      return !rid || (seatStatus[rid] || "Confirmed") === "Confirmed";
+    };
+
+    const fullDates = capDates.filter((d) =>
+      daySessions.filter((s) => (s.fields?.["Session Date"] || "") === d && isConfirmed(s)).length >= capacityLimit
+    );
+    if (fullDates.length) {
+      return new Response(
+        JSON.stringify({
+          error: `${fullDates.map(fmtDate).join(", ")} ${fullDates.length === 1 ? "is" : "are"} fully booked (${capacityLimit} students per day). Please choose ${fullDates.length === 1 ? "a different date" : "different dates"}.`,
+          fullDates,
+          capacityLimit,
+        }),
+        { status: 409 }
+      );
+    }
+  } catch {
+    // Non-fatal, like the duplicate check — if the capacity lookup itself
+    // fails, allow the submission (it still lands as Pending for staff review).
   }
 
   // The Rotation's own Hours Goal is the authoritative total when we found

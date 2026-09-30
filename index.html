@@ -2333,6 +2333,7 @@ async function loadStudentDirectory() {
     } while (offset);
     studentDirectory = all.map(rec => ({ id: rec.id, ...rec.fields }));
     await loadAllRotations();
+    loadCapacityLimit();
     populateStudentPicker('req');
     populateStudentPicker('recur');
     loadStudentUnavailability();
@@ -2549,6 +2550,16 @@ function renderRequestError(data) {
   }
   if (data.capExceeded) {
     lines.push(`<div style="margin-top:${lines.length ? '8px' : '0'}"><strong>Over your scheduled hours:</strong> you paid for ${data.hoursGoal} hours (up to ${data.hoursCap} with the 10% buffer), ${data.hoursUsed} already scheduled, and this batch requests ${data.hoursRequested} more. Only ${data.hoursRemaining} hour(s) are available — remove one or more dates below until you're under that.</div>`);
+  }
+  if (Array.isArray(data.fullDates) && data.fullDates.length) {
+    lines.push(`<div style="margin-top:${lines.length ? '8px' : '0'}"><strong>Fully booked:</strong> ${data.fullDates.map(d => formatDate(d)).join(', ')} (${data.capacityLimit} students per day). Choose ${data.fullDates.length === 1 ? 'a different date' : 'different dates'} below.</div>`);
+    const fullSet = new Set(data.fullDates);
+    requestFormDateRows().forEach(r => {
+      if (r.date && fullSet.has(r.date)) {
+        const input = document.getElementById(r.dateId);
+        if (input) input.style.borderColor = '#dc2626';
+      }
+    });
   }
   if (!lines.length) {
     lines.push(`<div>${data.error || 'Could not submit.'}</div>`);
@@ -3614,11 +3625,37 @@ function renderRiskBanner(sessions) {
 // ══════════════════════════════════════════════════════════════
 // FEATURE 2: CAPACITY LIMITS
 // ══════════════════════════════════════════════════════════════
-function getCapacityLimit() { return parseInt(localStorage.getItem('capacity_limit') || '4'); }
-function saveCapacity() {
+// The daily limit lives in the Airtable Settings table (same value the
+// session-request-submit function enforces). Cached here once loaded;
+// defaults to 4 until then.
+const SETTINGS_TABLE_ID = 'tblWrhu0Macqnjt3H';
+let capacityLimit = 4;
+let settingsRecordId = null;
+async function loadCapacityLimit() {
+  try {
+    const data = await atRead(STUDENTS_BASE_ID, SETTINGS_TABLE_ID, '?maxRecords=1');
+    const rec = data && (data.records || [])[0];
+    if (!rec) return;
+    settingsRecordId = rec.id;
+    const v = rec.fields && rec.fields['Daily Capacity Limit'];
+    if (typeof v === 'number' && v > 0) capacityLimit = v;
+    const input = document.getElementById('capacity-limit');
+    if (input) input.value = capacityLimit;
+    const disp = document.getElementById('capacity-display');
+    if (disp) disp.textContent = capacityLimit + ' students/day';
+    if (typeof renderCalendar === 'function') renderCalendar();
+  } catch (e) {
+    console.error('Could not load capacity limit', e);
+  }
+}
+function getCapacityLimit() { return capacityLimit; }
+async function saveCapacity() {
   const val = parseInt(document.getElementById('capacity-limit').value);
   if (!val || val < 1) { alert('Enter a valid number.'); return; }
-  localStorage.setItem('capacity_limit', val);
+  if (!settingsRecordId) { alert('Settings not loaded yet — please try again in a moment.'); return; }
+  const res = await atWrite(STUDENTS_BASE_ID, SETTINGS_TABLE_ID, 'PATCH', `/${settingsRecordId}`, { fields: { 'Daily Capacity Limit': val } });
+  if (!res) return;
+  capacityLimit = val;
   document.getElementById('capacity-display').textContent = val + ' students/day';
   const el = document.getElementById('capacity-saved');
   el.style.display = 'inline'; setTimeout(() => el.style.display = 'none', 2000);
