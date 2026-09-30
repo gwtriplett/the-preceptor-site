@@ -4520,9 +4520,38 @@ function openStudentModal(event, student, rotationId) {
     ['Pipeline',       f['Pipeline Status'] || '—'],
     ['Status',         multiSelectText(f['Admission Status']) || '—'],
   ];
-  document.getElementById('sdm-info').innerHTML = rotPicker + infoRows.map(([l,v]) =>
-    `<div><span style="color:var(--text-muted);font-size:11px;font-weight:500;text-transform:uppercase;">${l}</span><br><span style="font-weight:600;color:var(--text)">${v}</span></div>`
-  ).join('');
+  // The rest of the selected rotation's own fields. Long text spans both columns.
+  const r = _currentRotation || {};
+  const esc = v => String(v).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+  const hrs = v => (typeof v === 'number' ? v : 0);
+  const rotRows = _currentRotation ? [
+    ['Course',            r['Course Name'] ? esc(r['Course Name']) : '—'],
+    ['Semester / Quarter', r['Semester / Quarter'] || '—'],
+    ['Seat Status',       r['Seat Status'] || '—'],
+    ['Requested On',      r.createdTime ? fmtDateSdm(r.createdTime.slice(0, 10)) : '—'],
+    ['Prior Hours',       hrs(r['Prior Hours Completed']) + ' hrs'],
+    ['Hours Signed Off',  hrs(r['Total Hours Signed Off']) + ' hrs'],
+    ['Hours Remaining',   Math.max(0, hrs(r['Hours Goal']) - hrs(r['Prior Hours Completed']) - hrs(r['Total Hours Signed Off'])) + ' hrs'],
+    ['Payment Method',    r['Payment Method'] || '—'],
+    ['Payment Due',       fmtDateSdm(r['Payment Due Date'])],
+    ['PayPal Invoice',    r['PayPal Invoice Link'] ? `<a href="${esc(r['PayPal Invoice Link'])}" target="_blank" rel="noopener">Open</a>` : '—'],
+    ['Contract Sent',     fmtDateSdm(r['Contract Sent Date'])],
+    ['Contract Signed',   fmtDateSdm(r['Contract Signed Date'])],
+    ...(r['Additional Period Requested?'] === 'Yes'
+      ? [['Additional Period', `${fmtDateSdm(r['Additional Period - Start Date'])} – ${fmtDateSdm(r['Additional Period - End Date'])}`]]
+      : []),
+  ] : [];
+  const wideRows = _currentRotation ? [
+    ['Clinical Focus / Objectives', r['Clinical Focus / Objectives']],
+    ['Special Notes',               r['Special Notes']],
+  ].filter(([, v]) => v) : [];
+  const cell = ([l, v], wide) =>
+    `<div${wide ? ' style="grid-column:1/-1"' : ''}><span style="color:var(--text-muted);font-size:11px;font-weight:500;text-transform:uppercase;">${l}</span><br><span style="font-weight:${wide ? 400 : 600};color:var(--text);${wide ? 'white-space:pre-wrap;' : ''}">${v}</span></div>`;
+  document.getElementById('sdm-info').innerHTML = rotPicker
+    + infoRows.map(row => cell(row)).join('')
+    + (rotRows.length ? `<div style="grid-column:1/-1;margin-top:6px;padding-top:8px;border-top:1px solid var(--gray-100);font-size:11px;font-weight:700;color:var(--text-muted);text-transform:uppercase;letter-spacing:0.5px;">Rotation details</div>` : '')
+    + rotRows.map(row => cell(row)).join('')
+    + wideRows.map(([l, v]) => cell([l, esc(v)], true)).join('');
 
   // Email buttons
   renderSdmEmailButtons(view);
