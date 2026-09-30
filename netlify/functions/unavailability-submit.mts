@@ -2,6 +2,7 @@ import type { Context, Config } from "@netlify/functions";
 
 const STUDENTS_BASE_ID = "appf6D9Nbhb5Wg43L";
 const STUDENTS_TABLE_ID = "tblesg1u5m2ec3cgg";
+const ROTATIONS_TABLE_ID = "tbl6l75OeBLNzSp0i";
 const UNAVAILABILITY_TABLE_ID = "tblrbit6Z4MIyds8F";
 
 function isValidDate(d: string) {
@@ -10,6 +11,8 @@ function isValidDate(d: string) {
 
 // A student can have multiple Students records (one per semester/quarter). When
 // several match the same email, prefer whichever enrollment is actually current.
+// Pipeline Status lives on Rotations — each candidate is ranked by the best
+// status among its linked rotations.
 function statusRank(pipelineStatus: string): number {
   const s = pipelineStatus || "";
   if (s.includes("Active Rotation")) return 0;
@@ -54,8 +57,19 @@ export default async (req: Request, context: Context) => {
       return new Response(JSON.stringify({ error: lookupData?.error?.message || "Could not look up student record." }), { status: lookupResp.status });
     }
     const candidates = (lookupData?.records || []) as any[];
+    const rotationIds = candidates.flatMap(c => (c.fields?.["Rotations"] || []) as string[]);
+    const rotationStatus: Record<string, string> = {};
+    if (candidates.length > 1 && rotationIds.length) {
+      const formula = `OR(${rotationIds.map(id => `RECORD_ID()="${id}"`).join(",")})`;
+      const rotUrl = `https://api.airtable.com/v0/${STUDENTS_BASE_ID}/${ROTATIONS_TABLE_ID}?filterByFormula=${encodeURIComponent(formula)}&fields[]=${encodeURIComponent("Pipeline Status")}`;
+      const rotResp = await fetch(rotUrl, { headers: { Authorization: `Bearer ${token}` } });
+      const rotData = await rotResp.json();
+      if (rotResp.ok) (rotData?.records || []).forEach((r: any) => { rotationStatus[r.id] = r.fields?.["Pipeline Status"] || ""; });
+    }
+    const candidateRank = (c: any) =>
+      Math.min(2, ...((c.fields?.["Rotations"] || []) as string[]).map(id => statusRank(rotationStatus[id] || "")));
     candidates.sort((a, b) => {
-      const byStatus = statusRank(a.fields?.["Pipeline Status"]) - statusRank(b.fields?.["Pipeline Status"]);
+      const byStatus = candidateRank(a) - candidateRank(b);
       if (byStatus !== 0) return byStatus;
       return (b.createdTime || "").localeCompare(a.createdTime || "");
     });
