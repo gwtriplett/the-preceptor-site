@@ -272,6 +272,8 @@
   .blackout-day { background: #FEF2F2 !important; }
   .blackout-day .cal-day-num { color: var(--red) !important; }
   .cal-event.blackout { background: var(--red); font-style:italic; }
+  .cal-event.standby { background:transparent !important; color:var(--text-muted) !important; border:1.5px dashed var(--gray-400); font-style:italic; }
+  .cap-badge.cap-standby { background:var(--gray-100); color:var(--text-muted); margin-left:4px; }
   .capacity-bar { height:4px; border-radius:2px; margin-top:3px; }
   .capacity-full { background:var(--red); }
   .capacity-near { background:var(--amber); }
@@ -1144,21 +1146,21 @@
   </div>
 
   <div class="rev-grid" id="rev-stats">
-    <div class="rev-card blue"><div class="rev-label">Total Billed</div><div class="rev-val" id="rev-billed" style="color:var(--blue)">—</div><div class="rev-sub">sum of all Billed Amount fields</div></div>
-    <div class="rev-card green"><div class="rev-label">Amount Paid</div><div class="rev-val" id="rev-collected" style="color:var(--green)">—</div><div class="rev-sub">sum of all Amount Paid fields</div></div>
+    <div class="rev-card blue"><div class="rev-label">Total Billed</div><div class="rev-val" id="rev-billed" style="color:var(--blue)">—</div><div class="rev-sub">sum of Billed Amount across all rotations</div></div>
+    <div class="rev-card green"><div class="rev-label">Amount Paid</div><div class="rev-val" id="rev-collected" style="color:var(--green)">—</div><div class="rev-sub">sum of Amount Paid across all rotations</div></div>
     <div class="rev-card amber"><div class="rev-label">Balance Outstanding</div><div class="rev-val" id="rev-outstanding" style="color:var(--amber)">—</div><div class="rev-sub">billed minus paid</div></div>
     <div class="rev-card teal"><div class="rev-label">Active Students</div><div class="rev-val" id="rev-active" style="color:var(--teal)">—</div><div class="rev-sub">current rotations</div></div>
   </div>
 
   <div class="card" style="margin-bottom:16px;padding:0">
     <div style="padding:16px 20px;border-bottom:1px solid var(--gray-100)">
-      <div class="section-title">Per-student breakdown</div>
+      <div class="section-title">Per-rotation breakdown</div>
     </div>
     <div class="tbl-wrap">
       <table class="rev-table" id="rev-table">
         <thead><tr>
           <th>Student</th><th>ID</th><th>University</th>
-          <th>Hours Req.</th><th>Prior Hrs</th><th>Hours Done</th><th>Remaining</th><th>Progress</th>
+          <th>Hours Goal</th><th>Prior Hrs</th><th>Hours Done</th><th>Remaining</th><th>Progress</th>
           <th>Billed</th><th>Amount Paid</th><th>Balance</th><th>Admission Status</th><th></th>
         </tr></thead>
         <tbody id="rev-tbody"><tr><td colspan="12" style="text-align:center;padding:24px;color:var(--text-muted)">Connect Airtable to load data</td></tr></tbody>
@@ -2330,6 +2332,7 @@ async function loadStudentDirectory() {
       offset = data.offset || '';
     } while (offset);
     studentDirectory = all.map(rec => ({ id: rec.id, ...rec.fields }));
+    await loadAllRotations();
     populateStudentPicker('req');
     populateStudentPicker('recur');
     loadStudentUnavailability();
@@ -2338,9 +2341,42 @@ async function loadStudentDirectory() {
   }
 }
 
+// ── ROTATIONS (source of truth for payment, pipeline, hours goal, dates) ──
+// Every Rotation, all pages, indexed by linked Student record ID. Loaded
+// alongside the student directory; anything that used to read these fields
+// off the Students row reads them from here instead.
+let allRotations = [];
+let rotationsByStudent = {};
+let rotationById = {};
+async function loadAllRotations() {
+  let all = [];
+  let offset = '';
+  do {
+    const path = `?pageSize=100${offset ? '&offset=' + offset : ''}`;
+    const data = await atRead(STUDENTS_BASE_ID, ROTATIONS_TABLE_ID, path);
+    if (!data) throw new Error('Could not reach the server.');
+    all = all.concat(data.records || []);
+    offset = data.offset || '';
+  } while (offset);
+  allRotations = all.map(r => ({ id: r.id, createdTime: r.createdTime, ...r.fields }));
+  rotationsByStudent = {};
+  rotationById = {};
+  allRotations.forEach(r => { rotationById[r.id] = r; });
+  allRotations.forEach(r => (r['Student'] || []).forEach(sid => {
+    (rotationsByStudent[sid] = rotationsByStudent[sid] || []).push(r);
+  }));
+  Object.values(rotationsByStudent).forEach(list =>
+    list.sort((a, b) => (b['Requested Start Date'] || '').localeCompare(a['Requested Start Date'] || '')));
+  return allRotations;
+}
+function rotationsFor(student) { return (student && rotationsByStudent[student.id]) || []; }
+
+function multiSelectText(v) {
+  return Array.isArray(v) ? v.map(x => typeof x === 'object' ? x.name : x).join(', ') : (v || '');
+}
+
 function isSchedulableStudent(s) {
-  const status = s['Pipeline Status'] || '';
-  return status.includes('Active Rotation') || status.includes('Enrollment Completed');
+  return rotationsFor(s).some(isSchedulableRotation);
 }
 
 function populateStudentPicker(prefix) {
@@ -3014,12 +3050,16 @@ async function lookupStudent() {
       const allSessionsForEmail = data ? (data.records || []).map(r => ({ id: r.id, ...r.fields })) : [];
 
       const countFor = (id) => allSessionsForEmail.filter(s => s['Student ID (Airtable)'] === id).length;
-      const statusRank = (s) => {
-        const st = s['Pipeline Status'] || '';
+      // Pipeline Status lives on Rotations — rank each candidate by the best
+      // status among its linked rotations.
+      const candRotations = {};
+      await Promise.all(candidates.map(async c => { candRotations[c.id] = await loadStudentRotations(c); }));
+      const rotRank = (st) => {
         if (st.includes('Active Rotation')) return 0;
         if (st.includes('Enrollment Completed')) return 1;
         return 2;
       };
+      const statusRank = (s) => Math.min(2, ...(candRotations[s.id] || []).map(r => rotRank(r['Pipeline Status'] || '')));
       candidates.sort((a, b) => {
         const byCount = countFor(b.id) - countFor(a.id);
         if (byCount !== 0) return byCount;
@@ -3055,7 +3095,9 @@ async function lookupStudent() {
     : (studentRecord['Total Hours Required'] || 0);
 
   const signedOffDone = sessions.filter(s => s['Hours Signed Off']).reduce((a,s) => a + (s['Hours Signed Off'] || 0), 0);
-  const priorHours = studentRecord['Prior Hours Completed'] || 0;
+  const priorHours = (rotation && typeof rotation['Prior Hours Completed'] === 'number')
+    ? rotation['Prior Hours Completed']
+    : (studentRecord['Prior Hours Completed'] || 0);
 
   const totalDone = signedOffDone + priorHours;
   const pct = totalReq ? Math.min(100, Math.round(totalDone / totalReq * 100)) : 0;
@@ -3085,7 +3127,7 @@ async function lookupStudent() {
   window._studentPortalRecordId = studentRecord.id;
 
   // Pace tracker
-  const lastDate = sessions.length ? sessions[sessions.length - 1]['Session Date'] : (studentRecord['Requested End Date'] || null);
+  const lastDate = sessions.length ? sessions[sessions.length - 1]['Session Date'] : ((rotation && rotation['Requested End Date']) || null);
   renderPaceTracker(totalDone, totalReq, lastDate);
 
   // Completion certificate button
@@ -3521,8 +3563,9 @@ function computeAtRisk(sessions) {
   sessions.forEach(s => {
     const key = s['Student Email'] || s['Student Name'];
     if (!key) return;
-    if (!byStudent[key]) byStudent[key] = { name: s['Student Name'], email: s['Student Email'], uni: s['University'], totalReq: s['Total Hours Required'] || 0, endDate: s['Session Date'], signedOff: 0, scheduled: 0 };
+    if (!byStudent[key]) byStudent[key] = { name: s['Student Name'], email: s['Student Email'], uni: s['University'], totalReq: s['Total Hours Required'] || 0, endDate: s['Session Date'], signedOff: 0, scheduled: 0, rotationIds: new Set() };
     const rec = byStudent[key];
+    (s['Rotation'] || []).forEach(id => rec.rotationIds.add(id));
     if (s['Approval Status'] === 'Completed' && s['Hours Signed Off']) rec.signedOff += s['Hours Signed Off'];
     if (['Approved','Pending'].includes(s['Approval Status'])) rec.scheduled += s['Hours This Session'] || 0;
     // find latest session date as proxy end date from Students table — use session dates
@@ -3530,7 +3573,12 @@ function computeAtRisk(sessions) {
   const risks = [];
   Object.values(byStudent).forEach(rec => {
     if (!rec.totalReq) return;
-    const priorHours = (studentDirectory.find(d => d['Email'] === rec.email) || {})['Prior Hours Completed'] || 0;
+    // Prior Hours Completed lives on the Rotation — use the one the student's
+    // sessions are linked to, else their current rotation.
+    const stu = studentDirectory.find(d => d['Email'] === rec.email);
+    const rots = rotationsFor(stu);
+    const rot = rots.find(r => rec.rotationIds.has(r.id)) || pickCurrentRotation(rots);
+    const priorHours = (rot && rot['Prior Hours Completed']) || 0;
     const remaining = rec.totalReq - rec.signedOff - priorHours;
     if (remaining <= 0) return; // done
     const daysLeft = Math.ceil((new Date(rec.endDate + 'T12:00:00') - today) / 86400000);
@@ -3576,8 +3624,21 @@ function saveCapacity() {
   el.style.display = 'inline'; setTimeout(() => el.style.display = 'none', 2000);
 }
 
+// Seat Status (Rotations formula): Confirmed takes a seat, Standby waits in
+// line and doesn't count toward capacity, Released is done/cancelled.
+// Sessions with no linked rotation (legacy rows) count as Confirmed.
+function sessionSeatStatus(s) {
+  const rot = rotationById[(s['Rotation'] || [])[0]];
+  return (rot && rot['Seat Status']) || 'Confirmed';
+}
+function activeSessionsOnDate(dateStr) {
+  return allSessions.filter(s => s['Session Date'] === dateStr && ['Approved','Pending','Completed'].includes(s['Approval Status']));
+}
 function getSessionsOnDate(dateStr) {
-  return allSessions.filter(s => s['Session Date'] === dateStr && ['Approved','Pending','Completed'].includes(s['Approval Status'])).length;
+  return activeSessionsOnDate(dateStr).filter(s => sessionSeatStatus(s) === 'Confirmed').length;
+}
+function getStandbyOnDate(dateStr) {
+  return activeSessionsOnDate(dateStr).filter(s => sessionSeatStatus(s) === 'Standby').length;
 }
 
 function isAtCapacity(dateStr) { return getSessionsOnDate(dateStr) >= getCapacityLimit(); }
@@ -3709,10 +3770,10 @@ async function createRecurringSessions() {
 // FEATURE 5: REVENUE DASHBOARD
 // ══════════════════════════════════════════════════════════════
 // ── PRIOR HOURS OVERRIDE (for students who started before this scheduler) ──
-async function updatePriorHours(studentRecordId, value) {
+async function updatePriorHours(rotationId, value) {
   const num = value === '' ? 0 : parseFloat(value);
   if (isNaN(num) || num < 0) { alert('Please enter a valid number of hours.'); renderRevenuePage(); return; }
-  const res = await atWrite(STUDENTS_BASE_ID, STUDENTS_TABLE_ID, 'PATCH', `/${studentRecordId}`, { fields: { 'Prior Hours Completed': num } });
+  const res = await atWrite(STUDENTS_BASE_ID, ROTATIONS_TABLE_ID, 'PATCH', `/${rotationId}`, { fields: { 'Prior Hours Completed': num } });
   if (res) {
     showEmailToast('✓ Prior hours saved.', 'ok');
     await renderRevenuePage();
@@ -3721,36 +3782,24 @@ async function updatePriorHours(studentRecordId, value) {
 
 async function renderRevenuePage() {
   try {
-    // Fetch all students — sort by Student Name (Last, First)
-    const data = await atRead(STUDENTS_BASE_ID, STUDENTS_TABLE_ID, `?pageSize=100&sort[0][field]=Student%20Name&sort[0][direction]=asc`);
-    if (!data) throw new Error('Could not reach the server.');
-    const students = (data.records || []).map(rec => ({ id: rec.id, ...rec.fields }));
+    // Students (for name/ID/university) and Rotations (for everything
+    // money/hours/status) — both fully paged. One row per rotation,
+    // grouped under its student.
+    if (!studentDirectory.length) await loadStudentDirectory();
+    await loadAllRotations();
+    const studentsById = {};
+    studentDirectory.forEach(s => { studentsById[s.id] = s; });
 
-    // Aggregate signed-off hours per specific enrollment record (not just email —
-    // the same person can have multiple Students rows, one per semester/quarter,
-    // and hours must count against the right one). Falls back to email for any
-    // legacy/untagged session rows.
-    const sessionsByStudentId = {};
-    const sessionsByEmail = {};
-    allSessions.forEach(s => {
-      if (s['Hours Signed Off']) {
-        const idKey = s['Student ID (Airtable)'];
-        if (idKey) sessionsByStudentId[idKey] = (sessionsByStudentId[idKey] || 0) + s['Hours Signed Off'];
-        const emailKey = s['Student Email'];
-        if (emailKey) sessionsByEmail[emailKey] = (sessionsByEmail[emailKey] || 0) + s['Hours Signed Off'];
-      }
-    });
-    // Only trust the email-based fallback when that email maps to exactly one
-    // Students row — otherwise it can't tell which enrollment the hours belong to.
-    const emailRowCounts = {};
-    students.forEach(s => { const e = s['Email']; if (e) emailRowCounts[e] = (emailRowCounts[e] || 0) + 1; });
+    const rows = allRotations.map(r => ({ r, s: studentsById[(r['Student'] || [])[0]] || {} }));
+    rows.sort((x, y) =>
+      (x.s['Student Name'] || '').localeCompare(y.s['Student Name'] || '') ||
+      (x.r['Requested Start Date'] || '').localeCompare(y.r['Requested Start Date'] || ''));
 
-    // Totals — use Billed Amount and Amount Paid fields directly
     let totalBilled = 0, totalPaid = 0, activeCount = 0;
-    students.forEach(s => {
-      totalBilled += s['Billed Amount'] || 0;
-      totalPaid   += s['Amount Paid']   || 0;
-      if ((s['Pipeline Status'] || '').includes('Active')) activeCount++;
+    allRotations.forEach(r => {
+      totalBilled += r['Billed Amount'] || 0;
+      totalPaid   += r['Amount Paid']   || 0;
+      if ((r['Pipeline Status'] || '').includes('Active')) activeCount++;
     });
 
     const fmt = n => '$' + (n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -3761,50 +3810,46 @@ async function renderRevenuePage() {
     document.getElementById('rev-active').textContent      = activeCount;
 
     const tbody = document.getElementById('rev-tbody');
-    if (students.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="12" style="text-align:center;padding:24px;color:var(--text-muted)">No students found.</td></tr>';
+    if (rows.length === 0) {
+      tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;padding:24px;color:var(--text-muted)">No rotations found.</td></tr>';
       return;
     }
 
-    // Store student records globally for modal lookup
     window._studentMap = {};
-    students.forEach(s => { window._studentMap[s.id] = s; });
+    studentDirectory.forEach(s => { window._studentMap[s.id] = s; });
 
-    tbody.innerHTML = students.map(s => {
-      const totalReq  = s['Total Hours Required'] || 0;
-      const done      = sessionsByStudentId[s.id] || (emailRowCounts[s['Email']] === 1 ? (sessionsByEmail[s['Email']] || 0) : 0);
-      const prior     = s['Prior Hours Completed'] || 0;
+    let lastStudentId = null;
+    tbody.innerHTML = rows.map(({ r, s }) => {
+      const firstOfStudent = s.id !== lastStudentId;
+      lastStudentId = s.id;
+      const totalReq  = r['Hours Goal'] || 0;
+      const done      = r['Total Hours Signed Off'] || 0;
+      const prior     = r['Prior Hours Completed'] || 0;
       const totalDone = done + prior;
       const remaining = Math.max(0, totalReq - totalDone);
       const pct       = totalReq ? Math.min(100, Math.round(totalDone / totalReq * 100)) : 0;
-      const billed    = s['Billed Amount'] || 0;
-      const paid      = s['Amount Paid']   || 0;
+      const billed    = r['Billed Amount'] || 0;
+      const paid      = r['Amount Paid']   || 0;
       const balance   = billed - paid;
       const fullyPaid = balance <= 0 && billed > 0;
       const partPaid  = paid > 0 && balance > 0;
+      const admStatus = multiSelectText(r['Admission Status']) || '—';
+      const rotLabel  = [r['Course Name'], r['Semester / Quarter']].filter(Boolean).join(' · ') || r['Placement Label'] || 'Rotation';
+      const balColor  = fullyPaid ? 'var(--green)' : partPaid ? 'var(--amber)' : balance > 0 ? 'var(--red)' : 'var(--text-muted)';
+      const uni       = s['University / College'] || r['College/University'] || '';
 
-      // Admission Status — multipleSelects returns array
-      const admStatus = Array.isArray(s['Admission Status'])
-        ? s['Admission Status'].map(v => typeof v === 'object' ? v.name : v).join(', ')
-        : (s['Admission Status'] || '—');
-
-      const studentId = s['Student ID'] || '—';
-
-      // Balance color
-      const balColor = fullyPaid ? 'var(--green)' : partPaid ? 'var(--amber)' : balance > 0 ? 'var(--red)' : 'var(--text-muted)';
-
-      return `<tr>
+      return `<tr${firstOfStudent ? ' style="border-top:2px solid var(--gray-100)"' : ''}>
         <td>
-          <div style="font-weight:600;font-size:13px">${s['Student Name'] || '—'}</div>
-          <div style="font-size:11px;color:var(--text-muted)">${s['University / College'] || ''}</div>
+          ${firstOfStudent ? `<div style="font-weight:600;font-size:13px">${s['Student Name'] || '—'}</div>` : ''}
+          <div style="font-size:11px;color:var(--text-muted)">${rotLabel}${r['Pipeline Status'] ? ' · ' + r['Pipeline Status'] : ''}</div>
         </td>
-        <td style="font-family:monospace;font-size:12px;color:var(--blue)">${studentId}</td>
-        <td style="font-size:12px;color:var(--text-muted)">${s['University / College'] || '—'}</td>
+        <td style="font-family:monospace;font-size:12px;color:var(--blue)">${firstOfStudent ? (s['Student ID'] || '—') : ''}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${firstOfStudent ? (uni || '—') : ''}</td>
         <td style="text-align:center;font-weight:500">${totalReq}</td>
         <td style="text-align:center">
           <input type="number" step="0.5" value="${prior || ''}" placeholder="0"
             style="width:64px;text-align:center;padding:4px 6px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:12px;"
-            onchange="updatePriorHours('${s.id}', this.value)" title="Hours completed before this scheduler was in use" />
+            onchange="updatePriorHours('${r.id}', this.value)" title="Hours completed on this rotation before this scheduler was in use" />
         </td>
         <td style="text-align:center">${totalDone.toFixed(1)}</td>
         <td style="text-align:center;font-weight:700;color:${remaining <= 0 ? 'var(--green)' : 'var(--text)'}">${remaining.toFixed(1)}</td>
@@ -3817,13 +3862,13 @@ async function renderRevenuePage() {
         <td style="font-weight:700;text-align:right;color:${balColor}">${balance > 0 ? fmt(balance) : fullyPaid ? '<span style="color:var(--green)">✓ Paid in full</span>' : '—'}</td>
         <td style="font-size:11px;color:var(--text-muted)">${admStatus}</td>
         <td>
-          <button class="btn btn-sm btn-primary" onclick="openStudentModalById('${s.id}')" style="white-space:nowrap;">✉ Email</button>
+          ${s.id ? `<button class="btn btn-sm btn-primary" onclick="openStudentModalById('${s.id}', '${r.id}')" style="white-space:nowrap;">✉ Email</button>` : ''}
         </td>
       </tr>`;
     }).join('');
   } catch(e) {
     console.error(e);
-    document.getElementById('rev-tbody').innerHTML = `<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--red)">Error: ${e.message}</td></tr>`;
+    document.getElementById('rev-tbody').innerHTML = `<tr><td colspan="13" style="text-align:center;padding:24px;color:var(--red)">Error: ${e.message}</td></tr>`;
   }
 }
 
@@ -4108,11 +4153,15 @@ renderMonth = function() {
       cell.insertAdjacentHTML('beforeend', `<div class="cal-event blackout" style="font-size:10px">🚫 ${reason}</div>`);
     } else {
       const count = getSessionsOnDate(ds);
+      const standby = getStandbyOnDate(ds);
       const cap = getCapacityLimit();
       if (count > 0) {
         const pct = Math.min(100, Math.round(count/cap*100));
         const cls = count >= cap ? 'capacity-full' : count >= cap-1 ? 'capacity-near' : 'capacity-open';
         cell.insertAdjacentHTML('beforeend', `<div class="capacity-bar ${cls}" style="width:${pct}%"></div><span class="cap-badge ${count>=cap?'cap-full':'cap-open'}">${count}/${cap}</span>`);
+      }
+      if (standby > 0) {
+        cell.insertAdjacentHTML('beforeend', `<span class="cap-badge cap-standby" title="Standby — not counted toward capacity">+${standby} standby</span>`);
       }
     }
   });
@@ -4178,7 +4227,7 @@ function renderMonth() {
     const ds = isoDate(d);
     const sessions = sessionsOnDate(ds);
     html += `<div class="month-cell other-month"><div class="cal-day-num">${d.getDate()}</div>`;
-    sessions.slice(0,2).forEach(s => html += `<div class="cal-event ${statusClass(s['Approval Status'])}" title="${s['Student Name']} | ${s['Start Time']||''}-${s['End Time']||''}">${s['Student Name']}</div>`);
+    sessions.slice(0,2).forEach(s => html += `<div class="cal-event ${statusClass(s['Approval Status'])}${sessionSeatStatus(s) === 'Standby' ? ' standby' : ''}" title="${s['Student Name']} | ${s['Start Time']||''}-${s['End Time']||''}">${s['Student Name']}</div>`);
     html += '</div>';
   }
 
@@ -4189,7 +4238,7 @@ function renderMonth() {
     const isToday = ds === todayStr;
     html += `<div class="month-cell${isToday?' today':''}"><div class="cal-day-num">${day}</div>`;
     sessions.slice(0,5).forEach(s => {
-      html += `<div class="cal-event ${statusClass(s['Approval Status'])}" title="${s['Student Name']} | ${s['Start Time']||''}-${s['End Time']||''} | ${s['Clinical Focus']||''}">${s['Student Name']}</div>`;
+      html += `<div class="cal-event ${statusClass(s['Approval Status'])}${sessionSeatStatus(s) === 'Standby' ? ' standby' : ''}" title="${s['Student Name']} | ${s['Start Time']||''}-${s['End Time']||''} | ${s['Clinical Focus']||''}">${s['Student Name']}</div>`;
     });
     if (sessions.length > 5) html += `<div class="cal-more">+${sessions.length-5} more</div>`;
     html += '</div>';
@@ -4202,7 +4251,7 @@ function renderMonth() {
     const ds = isoDate(d);
     const sessions = sessionsOnDate(ds);
     html += `<div class="month-cell other-month"><div class="cal-day-num">${d.getDate()}</div>`;
-    sessions.slice(0,2).forEach(s => html += `<div class="cal-event ${statusClass(s['Approval Status'])}">${s['Student Name']}</div>`);
+    sessions.slice(0,2).forEach(s => html += `<div class="cal-event ${statusClass(s['Approval Status'])}${sessionSeatStatus(s) === 'Standby' ? ' standby' : ''}">${s['Student Name']}</div>`);
     html += '</div>';
   }
   html += '</div>';
@@ -4327,15 +4376,40 @@ function printCalendar() {
 
 let _currentStudent = null;
 
-function openStudentModalById(id) {
+function openStudentModalById(id, rotationId) {
   const student = window._studentMap && window._studentMap[id];
   if (!student) { alert('Student data not found. Please reload the page.'); return; }
-  openStudentModal(null, student);
+  openStudentModal(null, student, rotationId);
 }
 
-function openStudentModal(event, student) {
+// Overlays one Rotation's fields onto a copy of the Students row so the
+// modal and email templates read payment/status/dates/hours from the
+// rotation (the source of truth) under the names they already use.
+function studentWithRotation(student, rot) {
+  const v = { ...student };
+  const keys = ['Requested Start Date', 'Requested End Date', 'Billed Amount', 'Amount Paid',
+    'Payment Received Date', 'Payment Status', 'Payment Method', 'Payment Due Date',
+    'Pipeline Status', 'Admission Status', 'Prior Hours Completed', 'Course Name', 'Semester / Quarter'];
+  keys.forEach(k => { v[k] = rot ? rot[k] : undefined; });
+  v['Total Hours Required'] = rot ? rot['Hours Goal'] : undefined;
+  v['Paypal Invoice Link'] = rot ? rot['PayPal Invoice Link'] : undefined;
+  return v;
+}
+
+let _currentStudentBase = null;
+let _currentRotation = null;
+
+function selectSdmRotation(rotationId) {
+  openStudentModal(null, _currentStudentBase, rotationId);
+}
+
+function openStudentModal(event, student, rotationId) {
   if (event) event.stopPropagation();
-  _currentStudent = student;
+  _currentStudentBase = student;
+  const rotations = rotationsFor(student);
+  _currentRotation = rotations.find(r => r.id === rotationId) || pickCurrentRotation(rotations);
+  const view = studentWithRotation(student, _currentRotation);
+  _currentStudent = view;
   const m = document.getElementById('student-detail-modal');
 
   // Header
@@ -4343,28 +4417,35 @@ function openStudentModal(event, student) {
   document.getElementById('sdm-sub').textContent =
     [student['Degree / Program'], student['University / College']].filter(Boolean).join(' · ');
 
-  // Info grid
-  const f = student;
+  // Info grid — everything below Phone comes from the selected rotation.
+  const f = view;
+  const rotLabel = r => [r['Course Name'], r['Semester / Quarter']].filter(Boolean).join(' · ') || r['Placement Label'] || 'Rotation';
+  const rotPicker = rotations.length > 1
+    ? `<div style="grid-column:1/-1"><span style="color:var(--text-muted);font-size:11px;font-weight:500;text-transform:uppercase;">Rotation</span><br>
+        <select onchange="selectSdmRotation(this.value)" style="font-family:inherit;font-size:13px;padding:4px 6px;border:1px solid var(--gray-100);border-radius:6px;">
+          ${rotations.map(r => `<option value="${r.id}"${_currentRotation && r.id === _currentRotation.id ? ' selected' : ''}>${rotLabel(r)}${r['Pipeline Status'] ? ' — ' + r['Pipeline Status'] : ''}</option>`).join('')}
+        </select></div>`
+    : '';
   const infoRows = [
     ['Student ID',     f['Student ID'] || '—'],
     ['Email',          f['Email'] || '—'],
     ['Phone',          f['Phone Number'] || '—'],
     ['Start Date',     fmtDateSdm(f['Requested Start Date'])],
     ['End Date',       fmtDateSdm(f['Requested End Date'])],
-    ['Total Hours',    (f['Total Hours Required'] || '—') + ' hrs'],
+    ['Hours Goal',     (f['Total Hours Required'] || '—') + ' hrs'],
     ['Billed',         fmtMoneySdm(f['Billed Amount'])],
     ['Amount Paid',    fmtMoneySdm(f['Amount Paid'])],
     ['Payment Date',   fmtDateSdm(f['Payment Received Date'])],
-    ['Status',         (Array.isArray(f['Admission Status'])
-      ? f['Admission Status'].map(v => typeof v === 'object' ? v.name : v).join(', ')
-      : f['Admission Status']) || '—'],
+    ['Payment Status', f['Payment Status'] || '—'],
+    ['Pipeline',       f['Pipeline Status'] || '—'],
+    ['Status',         multiSelectText(f['Admission Status']) || '—'],
   ];
-  document.getElementById('sdm-info').innerHTML = infoRows.map(([l,v]) =>
+  document.getElementById('sdm-info').innerHTML = rotPicker + infoRows.map(([l,v]) =>
     `<div><span style="color:var(--text-muted);font-size:11px;font-weight:500;text-transform:uppercase;">${l}</span><br><span style="font-weight:600;color:var(--text)">${v}</span></div>`
   ).join('');
 
   // Email buttons
-  renderSdmEmailButtons(student);
+  renderSdmEmailButtons(view);
 
   // Rotations — each gets a Download PDF link for its session list.
   loadSdmRotations(student);
@@ -4449,7 +4530,7 @@ function buildEmailsSdm(s, paypalLink) {
   const hours      = s['Total Hours Required'] || '[X]';
   const billed     = s['Billed Amount'] ? fmtMoneySdm(s['Billed Amount']) : calcTotalSdm(s);
   const payDate    = fmtDateSdm(s['Payment Received Date']) || '[Payment Date]';
-  const paypal     = paypalLink || '[INSERT PAYPAL INVOICE LINK]';
+  const paypal     = paypalLink || s['Paypal Invoice Link'] || '[INSERT PAYPAL INVOICE LINK]';
   const toEmail    = s['Email'] || '';
 
   const sig = `Warm regards,
