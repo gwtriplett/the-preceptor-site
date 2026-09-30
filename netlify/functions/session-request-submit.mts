@@ -293,7 +293,7 @@ export default async (req: Request, context: Context) => {
     // Non-fatal — if the duplicate check itself fails, fall through and allow submission.
   }
 
-  // Daily capacity — the limit lives in the Airtable Settings table so staff
+  // Blackout dates and daily capacity — both live in the Airtable Settings table so staff
   // can change it without a redeploy. Only Confirmed seats count (Rotations
   // "Seat Status"); Standby and Released don't take a seat. Sessions with no
   // linked rotation (legacy rows) count as Confirmed, same as the calendar.
@@ -304,6 +304,25 @@ export default async (req: Request, context: Context) => {
     const setData: any = await setResp.json();
     const configured = setData?.records?.[0]?.fields?.["Daily Capacity Limit"];
     if (setResp.ok && typeof configured === "number" && configured > 0) capacityLimit = configured;
+
+    // Blackout dates — same Settings row, one "YYYY-MM-DD | reason" per line.
+    const blackoutText: string = (setResp.ok && setData?.records?.[0]?.fields?.["Blackout Dates"]) || "";
+    const blackouts = new Map<string, string>();
+    blackoutText.split("\n").forEach((line) => {
+      const [date, ...rest] = line.split("|");
+      const d = (date || "").trim();
+      if (/^\d{4}-\d{2}-\d{2}$/.test(d)) blackouts.set(d, rest.join("|").trim());
+    });
+    const blackoutDates = [...new Set(validRows.map((r: any) => (r.date || "").toString()))].filter((d) => blackouts.has(d));
+    if (blackoutDates.length) {
+      return new Response(
+        JSON.stringify({
+          error: `The clinic is closed on ${blackoutDates.map(fmtDate).join(", ")}. Please choose ${blackoutDates.length === 1 ? "a different date" : "different dates"}.`,
+          blackoutDates,
+        }),
+        { status: 409 }
+      );
+    }
 
     const capDates = [...new Set(validRows.map((r: any) => (r.date || "").toString()))];
     const capFormula = `AND(OR(${capDates.map((d) => `DATESTR({Session Date})="${d}"`).join(",")}), OR({Approval Status}="Pending",{Approval Status}="Approved",{Approval Status}="Completed"))`;

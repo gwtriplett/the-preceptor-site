@@ -2333,7 +2333,6 @@ async function loadStudentDirectory() {
     } while (offset);
     studentDirectory = all.map(rec => ({ id: rec.id, ...rec.fields }));
     await loadAllRotations();
-    loadCapacityLimit();
     populateStudentPicker('req');
     populateStudentPicker('recur');
     loadStudentUnavailability();
@@ -2550,6 +2549,16 @@ function renderRequestError(data) {
   }
   if (data.capExceeded) {
     lines.push(`<div style="margin-top:${lines.length ? '8px' : '0'}"><strong>Over your scheduled hours:</strong> you paid for ${data.hoursGoal} hours (up to ${data.hoursCap} with the 10% buffer), ${data.hoursUsed} already scheduled, and this batch requests ${data.hoursRequested} more. Only ${data.hoursRemaining} hour(s) are available — remove one or more dates below until you're under that.</div>`);
+  }
+  if (Array.isArray(data.blackoutDates) && data.blackoutDates.length) {
+    lines.push(`<div style="margin-top:${lines.length ? '8px' : '0'}"><strong>Clinic closed:</strong> ${data.blackoutDates.map(d => formatDate(d)).join(', ')}. Choose ${data.blackoutDates.length === 1 ? 'a different date' : 'different dates'} below.</div>`);
+    const closedSet = new Set(data.blackoutDates);
+    requestFormDateRows().forEach(r => {
+      if (r.date && closedSet.has(r.date)) {
+        const input = document.getElementById(r.dateId);
+        if (input) input.style.borderColor = '#dc2626';
+      }
+    });
   }
   if (Array.isArray(data.fullDates) && data.fullDates.length) {
     lines.push(`<div style="margin-top:${lines.length ? '8px' : '0'}"><strong>Fully booked:</strong> ${data.fullDates.map(d => formatDate(d)).join(', ')} (${data.capacityLimit} students per day). Choose ${data.fullDates.length === 1 ? 'a different date' : 'different dates'} below.</div>`);
@@ -3558,6 +3567,7 @@ function changePassword() {
 
 // ── INIT ──────────────────────────────────────────────
 document.addEventListener('DOMContentLoaded', () => {
+  loadCapacityLimit();
   checkAuth();
   setInterval(() => {
     const auth = sessionStorage.getItem('tps_auth');
@@ -3637,6 +3647,19 @@ async function loadCapacityLimit() {
     const rec = data && (data.records || [])[0];
     if (!rec) return;
     settingsRecordId = rec.id;
+    blackoutCache = parseBlackouts(rec.fields && rec.fields['Blackout Dates']);
+    // One-time move: blackouts this browser saved before they lived in
+    // Airtable get merged into the Settings row, then cleared locally.
+    try {
+      const local = JSON.parse(localStorage.getItem('blackout_dates') || '[]');
+      if (Array.isArray(local) && local.length) {
+        const have = new Set(blackoutCache.map(b => b.date));
+        const merged = blackoutCache.concat(local.filter(b => b && b.date && !have.has(b.date)).map(b => ({ date: b.date, reason: b.reason || '' })));
+        merged.sort((a, b) => a.date.localeCompare(b.date));
+        if (merged.length === blackoutCache.length || await saveBlackouts(merged)) localStorage.removeItem('blackout_dates');
+      }
+    } catch (e) { console.error('Blackout migration failed', e); }
+    if (typeof renderBlackoutList === 'function') renderBlackoutList();
     const v = rec.fields && rec.fields['Daily Capacity Limit'];
     if (typeof v === 'number' && v > 0) capacityLimit = v;
     const input = document.getElementById('capacity-limit');
@@ -3683,8 +3706,28 @@ function isAtCapacity(dateStr) { return getSessionsOnDate(dateStr) >= getCapacit
 // ══════════════════════════════════════════════════════════════
 // FEATURE 3: BLACKOUT DATES
 // ══════════════════════════════════════════════════════════════
-function getBlackouts() { return JSON.parse(localStorage.getItem('blackout_dates') || '[]'); }
-function saveBlackouts(arr) { localStorage.setItem('blackout_dates', JSON.stringify(arr)); }
+// Blackout dates live in the Settings table's "Blackout Dates" field, one
+// per line as "YYYY-MM-DD | reason" — same list session-request-submit
+// enforces. Cached here once loadCapacityLimit() reads the Settings row.
+let blackoutCache = [];
+function parseBlackouts(text) {
+  return (text || '').split('\n').map(line => {
+    const [date, ...rest] = line.split('|');
+    return { date: (date || '').trim(), reason: rest.join('|').trim() };
+  }).filter(b => /^\d{4}-\d{2}-\d{2}$/.test(b.date)).sort((a, b) => a.date.localeCompare(b.date));
+}
+function formatBlackouts(arr) {
+  return arr.map(b => b.reason ? `${b.date} | ${b.reason}` : b.date).join('\n');
+}
+function getBlackouts() { return blackoutCache.map(b => ({ ...b })); }
+async function saveBlackouts(arr) {
+  if (!settingsRecordId) { alert('Settings not loaded yet — please try again in a moment.'); return false; }
+  const res = await atWrite(STUDENTS_BASE_ID, SETTINGS_TABLE_ID, 'PATCH', `/${settingsRecordId}`, { fields: { 'Blackout Dates': formatBlackouts(arr) } });
+  if (!res) return false;
+  blackoutCache = arr;
+  if (typeof renderCalendar === 'function') renderCalendar();
+  return true;
+}
 
 function isBlackout(dateStr) { return getBlackouts().some(b => b.date === dateStr); }
 
@@ -3702,7 +3745,7 @@ function renderBlackoutList() {
 
 function addBlackout() { document.getElementById('blackout-date').focus(); }
 
-function saveBlackout() {
+async function saveBlackout() {
   const date = document.getElementById('blackout-date').value;
   const reason = document.getElementById('blackout-reason').value.trim();
   if (!date) { alert('Please select a date.'); return; }
@@ -3710,16 +3753,16 @@ function saveBlackout() {
   if (blackouts.some(b => b.date === date)) { alert('That date is already blocked.'); return; }
   blackouts.push({ date, reason });
   blackouts.sort((a,b) => a.date.localeCompare(b.date));
-  saveBlackouts(blackouts);
+  if (!(await saveBlackouts(blackouts))) return;
   renderBlackoutList();
   document.getElementById('blackout-date').value = '';
   document.getElementById('blackout-reason').value = '';
 }
 
-function removeBlackout(i) {
+async function removeBlackout(i) {
   const blackouts = getBlackouts();
   blackouts.splice(i, 1);
-  saveBlackouts(blackouts);
+  if (!(await saveBlackouts(blackouts))) return;
   renderBlackoutList();
 }
 
