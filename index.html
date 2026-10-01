@@ -300,6 +300,12 @@
   .rev-val { font-size:24px; font-weight:700; }
   .rev-sub { font-size:11px; color:var(--text-muted); margin-top:4px; }
   .rev-table th { background:var(--gray-50); }
+  /* Revenue tab uses the full window width so all 13 columns fit without sideways scrolling. */
+  .main.main-wide { max-width:none; }
+  .rev-table { width:100%; }
+  .rev-table th, .rev-table td { padding:8px 7px; }
+  .rev-table th { white-space:nowrap; font-size:10.5px; }
+  .rev-table td { font-size:12.5px; }
   .rev-bar-wrap { width:100%; height:8px; background:var(--gray-100); border-radius:4px; overflow:hidden; }
   .rev-bar { height:100%; background:var(--blue); border-radius:4px; }
 
@@ -1010,6 +1016,13 @@
         </div>
         <button class="btn btn-primary" onclick="sendStudentMessage()">Send message</button>
         <div id="msg-sent-confirm" class="msg-sent">✓ Your message has been sent. Your coordinator will follow up by email.</div>
+      </div>
+      <div class="card" style="margin-top:14px">
+        <div class="section-head" style="margin-bottom:10px">
+          <span class="section-title">Your message history</span>
+          <button class="btn btn-sm" onclick="loadStudentMessageHistory()">↻ Refresh</button>
+        </div>
+        <div id="msg-history" style="max-height:460px;overflow-y:auto;font-size:13px;color:var(--text-muted)">Loading…</div>
       </div>
     </div>
 
@@ -3220,6 +3233,7 @@ function setPortalTab(tab, el) {
     const el = document.getElementById('ptab-' + t);
     if (el) el.style.display = t === tab ? 'block' : 'none';
   });
+  if (tab === 'message') loadStudentMessageHistory();
 }
 
 // ── PACE TRACKER ──────────────────────────────────────
@@ -3489,7 +3503,7 @@ function sendStudentMessage() {
   const text = document.getElementById('msg-text').value.trim();
   if (!subject) { alert('Please select a subject.'); return; }
   if (!text) { alert('Please enter a message.'); return; }
-  submitCoordinatorMessage(subject, text);
+  submitCoordinatorMessage(subject, text).then(() => loadStudentMessageHistory());
   const cfg = getEmailConfig();
   if (hasValidCoordinatorEmail(cfg)) {
     sendEmailViaClaudeAPI(cfg.fromEmail,
@@ -3512,6 +3526,68 @@ Reply directly to the student at: ${window._studentPortalEmail}
   document.getElementById('msg-text').value = '';
   document.getElementById('msg-subject').value = '';
   setTimeout(() => document.getElementById('msg-sent-confirm').style.display = 'none', 5000);
+}
+
+// ── MESSAGE HISTORY ───────────────────────────────────
+// Every Coordinator Messages row sent from this student's email, newest
+// first: submitted date, subject, message, status, coordinator notes and
+// the session it's about (cancellation requests).
+const COORD_MESSAGES_TABLE_ID = 'tbltq7GwNZaR4mmUY';
+async function loadStudentMessageHistory() {
+  const box = document.getElementById('msg-history');
+  if (!box) return;
+  const email = (window._studentPortalEmail || '').toLowerCase();
+  if (!email) { box.textContent = 'Look yourself up to see your messages.'; return; }
+  box.textContent = 'Loading…';
+  try {
+    let msgs = [];
+    let offset = '';
+    do {
+      const formula = encodeURIComponent(`LOWER({Student Email})="${email.replace(/"/g, '')}"`);
+      const data = await atRead(STUDENTS_BASE_ID, COORD_MESSAGES_TABLE_ID,
+        `?filterByFormula=${formula}&sort[0][field]=Submitted&sort[0][direction]=desc&pageSize=100${offset ? '&offset=' + offset : ''}`);
+      if (!data) throw new Error('Could not reach the server.');
+      msgs = msgs.concat((data.records || []).map(r => ({ id: r.id, createdTime: r.createdTime, ...r.fields })));
+      offset = data.offset || '';
+    } while (offset);
+
+    if (!msgs.length) { box.innerHTML = '<div style="padding:8px 0">You haven\'t sent any messages yet.</div>'; return; }
+
+    // Session dates for messages tied to a session.
+    const sessionIds = [...new Set(msgs.flatMap(m => m['Session'] || []))];
+    const sessionLabel = {};
+    if (sessionIds.length) {
+      const f = encodeURIComponent(`OR(${sessionIds.map(id => `RECORD_ID()="${id}"`).join(',')})`);
+      const sd = await atRead(STUDENTS_BASE_ID, TABLE_ID, `?filterByFormula=${f}`);
+      ((sd && sd.records) || []).forEach(r => {
+        const sf = r.fields || {};
+        const t12 = t => { const [h, m] = String(t).split(':').map(Number); return isNaN(h) ? t : `${(h % 12) || 12}:${String(m || 0).padStart(2, '0')} ${h < 12 ? 'AM' : 'PM'}`; };
+        sessionLabel[r.id] = [sf['Session Date'] ? formatDate(sf['Session Date']) : '', sf['Start Time'] && sf['End Time'] ? `${t12(sf['Start Time'])}–${t12(sf['End Time'])}` : ''].filter(Boolean).join(' · ');
+      });
+    }
+
+    const esc = v => String(v || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    const statusColor = { 'New': 'var(--amber)', 'In Progress': 'var(--blue)', 'Resolved': 'var(--green)' };
+    box.innerHTML = msgs.map(m => {
+      const when = new Date(m['Submitted'] || m.createdTime);
+      const whenText = isNaN(when) ? '—' : when.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+      const status = m['Status'] || 'New';
+      const sessions = (m['Session'] || []).map(id => sessionLabel[id]).filter(Boolean);
+      return `
+        <div style="border:1px solid var(--gray-100);border-radius:8px;padding:10px 12px;margin-bottom:8px;color:var(--text)">
+          <div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap;align-items:baseline">
+            <div><strong>${esc(m['Subject'] || 'Message')}</strong> <span style="color:var(--text-muted);font-size:11.5px">· ${whenText}</span></div>
+            <span style="font-size:11px;font-weight:700;color:${statusColor[status] || 'var(--text-muted)'};text-transform:uppercase">${esc(status)}</span>
+          </div>
+          ${sessions.length ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">Session: ${esc(sessions.join(', '))}</div>` : ''}
+          <div style="white-space:pre-wrap;margin-top:6px">${esc(m['Message'])}</div>
+          ${m['Coordinator Notes'] ? `<div style="white-space:pre-wrap;margin-top:8px;padding:8px 10px;background:var(--gray-50);border-radius:6px;font-size:12.5px"><span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase">Coordinator notes</span><br>${esc(m['Coordinator Notes'])}</div>` : ''}
+        </div>`;
+    }).join('');
+  } catch (e) {
+    console.error(e);
+    box.innerHTML = '<div style="color:var(--red)">Could not load your messages.</div>';
+  }
 }
 
 // ── SESSION CANCELLATION ──────────────────────────────
@@ -3937,9 +4013,9 @@ async function renderRevenuePage() {
           <div class="rev-bar-wrap"><div class="rev-bar" style="width:${pct}%;background:${pct>=100?'var(--green)':pct>=75?'var(--amber)':'var(--blue)'}"></div></div>
           <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${pct}%</div>
         </td>
-        <td style="font-weight:600;text-align:right">${fmt(billed)}</td>
-        <td style="font-weight:600;text-align:right;color:${paid > 0 ? 'var(--green)' : 'var(--text-muted)'}">${paid > 0 ? fmt(paid) : '—'}</td>
-        <td style="font-weight:700;text-align:right;color:${balColor}">${balance > 0 ? fmt(balance) : fullyPaid ? '<span style="color:var(--green)">✓ Paid in full</span>' : '—'}</td>
+        <td style="font-weight:600;text-align:right;white-space:nowrap">${fmt(billed)}</td>
+        <td style="font-weight:600;text-align:right;white-space:nowrap;color:${paid > 0 ? 'var(--green)' : 'var(--text-muted)'}">${paid > 0 ? fmt(paid) : '—'}</td>
+        <td style="font-weight:700;text-align:right;white-space:nowrap;color:${balColor}">${balance > 0 ? fmt(balance) : fullyPaid ? '<span style="color:var(--green)">✓ Paid in full</span>' : '—'}</td>
         <td style="font-size:11px;color:var(--text-muted)">${admStatus}</td>
         <td>
           ${s.id ? `<button class="btn btn-sm btn-primary" onclick="openStudentModalById('${s.id}', '${r.id}')" style="white-space:nowrap;">✉ Email</button>` : ''}
@@ -4183,6 +4259,7 @@ loadSessions = async function() {
 const _origSwitchMode = switchMode;
 switchMode = function(mode) {
   _origSwitchMode.apply(this, arguments);
+  document.querySelector('.main')?.classList.toggle('main-wide', mode === 'revenue');
   if (mode === 'revenue') renderRevenuePage();
   if (mode === 'planning') { renderBlackoutList(); populateCertStudentSelect(); renderPortalAccessList(); document.getElementById('capacity-limit').value = getCapacityLimit(); }
 };
