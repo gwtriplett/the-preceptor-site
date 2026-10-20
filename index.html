@@ -604,11 +604,23 @@
     </div>
 
     <hr style="border:none;border-top:1px solid var(--gray-100);margin:20px 0">
-    <div style="font-size:14px;font-weight:600;margin-bottom:4px">Staff Password</div>
-    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">The staff password is checked on the server. To change it, edit <strong>STAFF_PASSWORD</strong> in Netlify → Site configuration → Environment variables, then redeploy. Everyone signed in is signed out when it changes.</div>
+    <div style="font-size:14px;font-weight:600;margin-bottom:4px">Change Staff Password</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-bottom:12px">Update the password staff use to log in to this scheduler. Share the new password securely with your team.</div>
+    <div class="form-grid" style="margin-bottom:4px">
+      <div class="form-group">
+        <label>New staff password</label>
+        <input type="password" id="new-pw" placeholder="Choose a strong password" />
+      </div>
+      <div class="form-group">
+        <label>Confirm password</label>
+        <input type="password" id="confirm-pw" placeholder="Repeat password" />
+      </div>
+    </div>
+    <div id="pw-change-msg" style="font-size:12px;min-height:16px;margin-bottom:8px"></div>
     <div class="modal-footer">
       <button class="btn" onclick="closeSettings()">Cancel</button>
       <button class="btn btn-primary btn-sm" onclick="sendTestEmail()" style="margin-right:auto">Send test email</button>
+      <button class="btn btn-primary btn-sm" onclick="changePassword()">Update password</button>
       <button class="btn btn-primary" onclick="saveSettings()">Save & Connect</button>
     </div>
   </div>
@@ -1541,22 +1553,10 @@
 // ══════════════════════════════════════════════════════════════
 // Default staff password — coordinator should change this
 // in Settings after first login.
+const DEFAULT_STAFF_PW = 'TPS2024!';
 
-// Asks the server to check a staff password; returns a signed staff pass
-// (or null if the password is wrong). The password itself is never stored.
-async function requestStaffPass(pw) {
-  try {
-    const resp = await fetch('/.netlify/functions/staff-login', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ password: pw })
-    });
-    const data = await resp.json().catch(() => ({}));
-    return resp.ok && data.pass ? data.pass : null;
-  } catch (e) {
-    console.error(e);
-    return null;
-  }
+function getStaffPassword() {
+  return localStorage.getItem('tps_staff_pw') || DEFAULT_STAFF_PW;
 }
 
 let currentRole = 'staff';
@@ -1572,17 +1572,14 @@ function setLoginRole(role, el) {
   document.getElementById('student-login-error').textContent = '';
 }
 
-async function attemptLogin() {
+function attemptLogin() {
   const pw = document.getElementById('staff-password').value;
   const errEl = document.getElementById('login-error');
   if (!pw) { errEl.textContent = 'Please enter the staff password.'; return; }
-  errEl.textContent = 'Checking…';
-  const pass = await requestStaffPass(pw);
-  if (pass) {
-    errEl.textContent = '';
-    staffPass = pass;
+  if (pw === getStaffPassword()) {
+    staffPasswordEntered = pw;
     sessionStorage.setItem('tps_auth', 'staff');
-    sessionStorage.setItem('tps_staff_pass', pass);
+    sessionStorage.setItem('tps_staff_pw_session', pw);
     showApp('staff');
   } else {
     errEl.textContent = 'Incorrect password. Please try again.';
@@ -1683,8 +1680,6 @@ function addSignOutButton() {
 function signOut() {
   sessionStorage.removeItem('tps_auth');
   sessionStorage.removeItem('tps_staff_pw_session');
-  sessionStorage.removeItem('tps_staff_pass');
-  staffPass = '';
   sessionStorage.removeItem('tps_student_email');
   sessionStorage.removeItem('tps_student_login_type');
   window._studentLoginType = 'email';
@@ -1719,12 +1714,9 @@ function checkAuth() {
   }
 
   const auth = sessionStorage.getItem('tps_auth');
-  // Older sessions stored the raw password — drop it.
-  sessionStorage.removeItem('tps_staff_pw_session');
   if (auth === 'staff') {
-    staffPass = sessionStorage.getItem('tps_staff_pass') || '';
-    if (staffPass) showApp('staff');
-    else sessionStorage.removeItem('tps_auth');
+    staffPasswordEntered = sessionStorage.getItem('tps_staff_pw_session') || '';
+    showApp('staff');
   }
   else if (auth === 'student') {
     loggedInStudentEmail = sessionStorage.getItem('tps_student_email') || '';
@@ -1746,30 +1738,24 @@ const ROTATIONS_TABLE_ID = 'tbl6l75OeBLNzSp0i';
    AIRTABLE ACCESS — via secure serverless functions
    ------------------------------------------------------------
    No Airtable token lives in this page. Staff reads and writes go
-   through airtable-read / airtable-write, which require the signed
-   staff pass from staff-login (held in staffPass below). The student
-   portal reads through student-read instead, which only returns the
-   signed-in student's own records (other students' sessions come
-   back as anonymous "Booked" slots for the calendar).
+   through airtable-read / airtable-write, which require the staff
+   password — captured at login into staffPasswordEntered below.
+   The student portal reads through student-read instead, which only
+   returns the signed-in student's own records (other students'
+   sessions come back as anonymous "Booked" slots for the calendar).
    ============================================================ */
-let staffPass = '';
+let staffPasswordEntered = '';
 // The email / Student ID the student portal is currently showing.
 function studentIdentity() { return window._studentLookupValue || loggedInStudentEmail || ''; }
-// A staff pass expires after 12 hours (or when STAFF_PASSWORD changes).
-function handleStaffPassExpired() {
-  if (!staffPass) return;
-  alert('Your staff sign-in has expired. Please sign in again.');
-  signOut();
-}
 
 async function atRead(base, table, path) {
   try {
-    const resp = await fetch(staffPass ? '/.netlify/functions/airtable-read' : '/.netlify/functions/student-read', {
+    const asStaff = !!staffPasswordEntered;
+    const resp = await fetch(asStaff ? '/.netlify/functions/airtable-read' : '/.netlify/functions/student-read', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(staffPass ? { staffPass, base, table, path } : { student: studentIdentity(), base, table, path })
+      body: JSON.stringify(asStaff ? { staffPassword: staffPasswordEntered, base, table, path } : { student: studentIdentity(), base, table, path })
     });
-    if (resp.status === 401) handleStaffPassExpired();
     const data = await resp.json();
     if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
     return data;
@@ -1784,9 +1770,8 @@ async function atWrite(base, table, method, path, body) {
     const resp = await fetch('/.netlify/functions/airtable-write', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ staffPass, base, table, method, path, body })
+      body: JSON.stringify({ staffPassword: staffPasswordEntered, base, table, method, path, body })
     });
-    if (resp.status === 401) handleStaffPassExpired();
     const data = await resp.json();
     if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);
     return data;
@@ -1860,7 +1845,7 @@ async function sendEmailViaClaudeAPI(toEmail, subject, bodyText) {
     const r = await fetch('/.netlify/functions/compose-email', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ toEmail, subject, bodyText, fromName: cfg.fromName, clinicName: cfg.clinicName, staffPass, student: staffPass ? '' : studentIdentity() })
+      body: JSON.stringify({ toEmail, subject, bodyText, fromName: cfg.fromName, clinicName: cfg.clinicName, staffPassword: staffPasswordEntered, student: staffPasswordEntered ? '' : studentIdentity() })
     });
     const data = await r.json();
     if (!r.ok || !data.ok) throw new Error(data?.error || 'Email composition failed');
@@ -3263,11 +3248,11 @@ function renderRotationsTab(rotations) {
   }).join('');
 }
 
-// The rotation PDF opens as a plain link, so it carries who's asking:
-// the staff pass, or the student's email / ID (server checks ownership).
-function rotationPdfUrl(rotationId) {
-  const who = staffPass ? `pass=${encodeURIComponent(staffPass)}` : `student=${encodeURIComponent(studentIdentity())}`;
-  return `/.netlify/functions/rotation-sessions-pdf?rotationId=${encodeURIComponent(rotationId)}&${who}`;
+// The rotation PDF opens as a plain link; the server only builds it for
+// the student the rotation belongs to, so the link carries that student's
+// email / ID (the portal's own, or the one staff are viewing).
+function rotationPdfUrl(rotationId, who) {
+  return `/.netlify/functions/rotation-sessions-pdf?rotationId=${encodeURIComponent(rotationId)}&student=${encodeURIComponent(who || studentIdentity())}`;
 }
 
 // ── STUDENT PORTAL LOOKUP ────────────────────────────
@@ -3874,6 +3859,19 @@ function formatDate(d) {
   if (!d) return '—';
   const dt = new Date(d + 'T12:00:00');
   return dt.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+}
+
+// ── CHANGE PASSWORD ───────────────────────────────────
+function changePassword() {
+  const newPw = document.getElementById('new-pw').value;
+  const confPw = document.getElementById('confirm-pw').value;
+  const msg = document.getElementById('pw-change-msg');
+  if (!newPw || newPw.length < 6) { msg.style.color='var(--red)'; msg.textContent='Password must be at least 6 characters.'; return; }
+  if (newPw !== confPw) { msg.style.color='var(--red)'; msg.textContent='Passwords do not match.'; return; }
+  localStorage.setItem('tps_staff_pw', newPw);
+  msg.style.color='var(--green)'; msg.textContent='✓ Password updated. Share the new password with your staff.';
+  document.getElementById('new-pw').value = '';
+  document.getElementById('confirm-pw').value = '';
 }
 
 // ── INIT ──────────────────────────────────────────────
@@ -4511,7 +4509,7 @@ submitRequest = async function() {
     if (isAtCapacity(date)) {
       const pw = prompt(`${formatDate(date)} is fully booked (at maximum capacity of ${getCapacityLimit()} students).\n\nStaff can override this and auto-approve the session by entering the staff password:`);
       if (pw === null) return;
-      if (!(await requestStaffPass(pw))) { alert('Incorrect staff password. Session not added.'); return; }
+      if (pw !== getStaffPassword()) { alert('Incorrect staff password. Session not added.'); return; }
       const approverName = prompt('Enter your name (Preceptor/Coordinator) to approve this session:');
       if (!approverName) return;
       capacityOverride = { name: approverName };
@@ -4901,7 +4899,7 @@ async function loadSdmRotations(student) {
           </div>
           <div style="display:flex;gap:6px;flex-wrap:wrap;">
             <button type="button" class="btn btn-primary btn-sm" onclick="viewRotationSessions('${r.id}')">👁 View</button>
-            <a href="${rotationPdfUrl(r.id)}" target="_blank" class="btn btn-teal btn-sm" style="text-decoration:none;">⬇ Download PDF</a>
+            <a href="${rotationPdfUrl(r.id, student['Email'] || student['Student ID'])}" target="_blank" class="btn btn-teal btn-sm" style="text-decoration:none;">⬇ Download PDF</a>
           </div>
         </div>`;
     }).join('');
@@ -5390,7 +5388,7 @@ async function runScheduleAudit() {
     const resp = await fetch('/.netlify/functions/schedule-audit', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ staffPass, action: 'audit' })
+      body: JSON.stringify({ staffPassword: staffPasswordEntered, action: 'audit' })
     });
     const data = await resp.json();
     if (!resp.ok) throw new Error(data?.error || `Server error (${resp.status})`);

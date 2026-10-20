@@ -1,5 +1,4 @@
 import type { Context, Config } from "@netlify/functions";
-import { verifyStaffPass, unauthorized } from "./lib/staff-auth.mts";
 import { resolveStudent } from "./lib/student-identity.mts";
 
 export default async (req: Request, context: Context) => {
@@ -14,7 +13,7 @@ export default async (req: Request, context: Context) => {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 });
   }
 
-  const { toEmail, subject, bodyText, fromName, clinicName, staffPass, student } = input || {};
+  const { toEmail, subject, bodyText, fromName, clinicName, staffPassword, student } = input || {};
   if (!toEmail || !subject || !bodyText) {
     return new Response(JSON.stringify({ error: "toEmail, subject, and bodyText are required." }), { status: 400 });
   }
@@ -24,10 +23,13 @@ export default async (req: Request, context: Context) => {
 
   // Uses the site's Anthropic key, so only staff or a real student on file
   // (the portal's notifications to the coordinator) may call it.
-  if (!verifyStaffPass(staffPass)) {
+  const expectedPassword = Netlify.env.get("STAFF_PASSWORD");
+  if (!expectedPassword || staffPassword !== expectedPassword) {
     const airtableToken = Netlify.env.get("AIRTABLE_TOKEN");
     const who = airtableToken ? await resolveStudent(airtableToken, student).catch(() => null) : null;
-    if (!who || !who.studentIds.size) return unauthorized();
+    if (!who || !who.studentIds.size) {
+      return new Response(JSON.stringify({ error: "Not authorized." }), { status: 401 });
+    }
   }
 
   const apiKey = Netlify.env.get("ANTHROPIC_API_KEY");

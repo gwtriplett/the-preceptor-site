@@ -1,6 +1,5 @@
 import type { Context, Config } from "@netlify/functions";
 import PDFDocument from "pdfkit";
-import { verifyStaffPass, unauthorized } from "./lib/staff-auth.mts";
 import { resolveStudent, ownsRotation } from "./lib/student-identity.mts";
 
 const BASE_ID = "appf6D9Nbhb5Wg43L";
@@ -41,8 +40,8 @@ function pdfToBuffer(draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
 }
 
 // Read-only. Opened as a plain link, so access is checked from the query
-// string: a staff pass (pass=) or the email / Student ID of the student the
-// rotation belongs to (student=).
+// string: the email / Student ID of the student the rotation belongs to
+// (student=).
 export default async (req: Request, context: Context) => {
   const url = new URL(req.url);
   const rotationId = (url.searchParams.get("rotationId") || "").trim();
@@ -65,10 +64,11 @@ export default async (req: Request, context: Context) => {
     }
     const rf = rotation.fields || {};
 
-    // Staff (pass=) or the student this rotation belongs to (student=).
-    if (!verifyStaffPass(url.searchParams.get("pass"))) {
-      const who = await resolveStudent(token, url.searchParams.get("student")).catch(() => null);
-      if (!who || !ownsRotation(who, rotationId, rf)) return unauthorized();
+    // Only for the student this rotation belongs to (student= their email
+    // or Student ID — staff links pass the student's email too).
+    const who = await resolveStudent(token, url.searchParams.get("student")).catch(() => null);
+    if (!who || !ownsRotation(who, rotationId, rf)) {
+      return new Response(JSON.stringify({ error: "Not authorized." }), { status: 401 });
     }
 
     let studentName = rf["Placement Label"] || "";

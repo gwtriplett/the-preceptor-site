@@ -1,5 +1,4 @@
 import type { Context, Config } from "@netlify/functions";
-import { verifyStaffPass } from "./lib/staff-auth.mts";
 
 // Finds over-scheduled rotations for the staff Schedule Audit. Emails are opened
 // as Gmail drafts in the browser (like the Revenue tab), not sent from here.
@@ -171,7 +170,9 @@ export default async (req: Request, context: Context) => {
     return json({ error: "Invalid JSON body" }, 400);
   }
 
-  if (!verifyStaffPass(input.staffPass)) return json({ error: "Not authorized. Please sign in again." }, 401);
+  const expectedPassword = Netlify.env.get("STAFF_PASSWORD");
+  if (!expectedPassword) return json({ error: "Server is missing STAFF_PASSWORD." }, 500);
+  if (!input.staffPassword || input.staffPassword !== expectedPassword) return json({ error: "Not authorized." }, 401);
 
   if (input.action === "audit") {
     const token = Netlify.env.get("AIRTABLE_TOKEN");
