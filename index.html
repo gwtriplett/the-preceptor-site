@@ -207,6 +207,24 @@
     .main { padding: 12px; }
   }
 
+  /* Top nav on phones: tighter spacing, one-line labels, mode tabs scroll sideways if they don't fit */
+  @media (max-width: 700px) {
+    .topbar { padding: 0 10px; gap: 8px; height: 56px; }
+    .brand { gap: 6px; flex-shrink: 0; }
+    .brand-icon { width: 32px; height: 32px; }
+    .brand-name { font-size: 13px; white-space: nowrap; }
+    .brand-sub { display: none; }
+    .mode-tabs { min-width: 0; overflow-x: auto; scrollbar-width: none; flex-shrink: 1; }
+    .mode-tabs::-webkit-scrollbar { display: none; }
+    .mode-tab { padding: 6px 10px; font-size: 12px; white-space: nowrap; flex-shrink: 0; }
+    .airtable-config { flex-shrink: 0; }
+    .airtable-config .config-badge { display: none; }
+    .airtable-config .btn { white-space: nowrap; }
+  }
+  @media (max-width: 420px) {
+    .brand-name { display: none; }
+  }
+
   /* ── CALENDAR ── */
   .cal-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
   .cal-nav { display:flex; align-items:center; gap:10px; }
