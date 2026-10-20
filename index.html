@@ -70,13 +70,37 @@
   tr:hover td { background: var(--gray-50); }
 
   /* BADGES */
-  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; }
-  .badge-pending { background: var(--amber-light); color: var(--amber); }
-  .badge-approved { background: var(--green-light); color: var(--green); }
-  .badge-denied { background: var(--red-light); color: var(--red); }
-  .badge-completed { background: var(--teal-light); color: var(--teal); }
-  .badge-noshow { background: var(--gray-100); color: var(--gray-700); }
-  .badge-cancelled { background: var(--gray-100); color: var(--gray-700); text-decoration: line-through; }
+  /* Shared status badges — one palette for every session / seat status.
+     Text colors are darkened tones chosen to meet WCAG AA (4.5:1) on their tint. */
+  .badge { display: inline-flex; align-items: center; gap: 4px; padding: 3px 9px; border-radius: 20px; font-size: 11px; font-weight: 600; white-space: nowrap; }
+  .badge-pending, .badge-standby { background: #FFF3D6; color: #7A4A00; }
+  .badge-approved, .badge-confirmed { background: #DFF5E7; color: #1B6236; }
+  .badge-completed { background: #E0EEFC; color: #14548F; }
+  .badge-denied { background: #FCE6E6; color: #9B2222; }
+  .badge-cancelled, .badge-released { background: #ECEFF3; color: #47505C; }
+  .badge-noshow { background: #7A1C1C; color: #FFFFFF; }
+
+  /* Rotation summary cards + hours tracker */
+  .rot-cards { display: grid; grid-template-columns: 1fr; gap: 12px; margin-bottom: 16px; }
+  @media (min-width: 900px) { .rot-cards { grid-template-columns: 1fr 1fr; } }
+  .rot-card { background: var(--white); border: 1px solid var(--gray-100); border-radius: var(--radius); padding: 14px 16px; min-width: 0; }
+  .rot-card-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 10px; margin-bottom: 8px; }
+  .rot-card-title { font-size: 14px; font-weight: 700; color: var(--text); }
+  .rot-card-sub { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+  .rot-card-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px 12px; font-size: 13px; }
+  .rot-card-grid .lbl { color: var(--text-muted); font-size: 11px; }
+  .rot-unsigned { color: #8A5300; font-weight: 600; }
+  .hrs-tracker { margin-top: 12px; border-top: 1px solid var(--gray-100); padding-top: 10px; }
+  .hrs-nums { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 6px; text-align: center; }
+  .hrs-nums .n { font-size: 18px; font-weight: 800; color: var(--text); }
+  .hrs-nums .lbl { font-size: 10px; color: var(--text-muted); text-transform: uppercase; letter-spacing: .03em; }
+  .hrs-bar { display: flex; height: 10px; border-radius: 6px; background: var(--gray-100); overflow: hidden; margin-top: 8px; }
+  .hrs-bar .done { background: #3B8BEB; }
+  .hrs-bar .sched { background: #6EE7F2; }
+  .hrs-legend { display: flex; gap: 12px; font-size: 11px; color: var(--text-muted); margin-top: 4px; flex-wrap: wrap; }
+  .hrs-legend i { display: inline-block; width: 8px; height: 8px; border-radius: 2px; margin-right: 4px; vertical-align: middle; }
+  .hrs-warn { margin-top: 8px; font-size: 12px; color: #9B2222; font-weight: 600; }
+  .hrs-note { font-size: 12px; color: var(--text-muted); }
 
   /* BUTTONS */
   .btn { padding: 7px 14px; border-radius: var(--radius-sm); border: 1px solid var(--gray-100); background: var(--white); font-size: 13px; font-weight: 500; cursor: pointer; color: var(--text); transition: all 0.15s; }
@@ -597,6 +621,7 @@
       <select id="req-rotation" onchange="updateRotationHint()" style="width:100%;padding:8px 10px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:13px;"></select>
       <div id="req-rotation-hint" style="font-size:11px;color:var(--text-muted);margin-top:4px;"></div>
     </div>
+    <div id="req-hours-preview" style="display:none;font-size:12.5px;font-weight:600;margin:-6px 0 14px;padding:8px 12px;border-radius:6px;"></div>
 
     <!-- Staff-only rotation picker: shown once staff pick an existing student
          above, so sessions staff add by hand also get linked to a Rotation —
@@ -825,7 +850,7 @@
       <div class="hours-ring-wrap">
         <div>
           <div class="hours-big" id="s-hours-done">0</div>
-          <div class="hours-detail">hours signed off</div>
+          <div class="hours-detail">hours completed</div>
         </div>
         <div style="flex:1">
           <div class="portal-progress-bg">
@@ -839,6 +864,9 @@
         </div>
       </div>
     </div>
+
+    <!-- ROTATION SUMMARY CARDS (one per rotation, newest first, each with its hours tracker) -->
+    <div id="s-rotation-cards" class="rot-cards"></div>
 
     <!-- PACE TRACKER -->
     <div id="s-pace-card" style="margin-bottom:16px"></div>
@@ -1953,7 +1981,6 @@ function renderTable() {
 
   tbody.innerHTML = sessions.map(s => {
     const status = s['Approval Status'] || 'Pending';
-    const badgeClass = { Pending:'badge-pending', Approved:'badge-approved', Denied:'badge-denied', Cancelled:'badge-cancelled', Completed:'badge-completed', 'No Show':'badge-noshow' }[status] || 'badge-pending';
     const pct = s['Total Hours Required'] ? Math.min(100, Math.round((s['Hours Signed Off'] || 0) / s['Total Hours Required'] * 100)) : 0;
     const fillClass = pct >= 100 ? 'done' : pct >= 75 ? 'warn' : '';
     const needsSignoff = status === 'Completed' && !s['Signed Off By'];
@@ -1985,7 +2012,7 @@ function renderTable() {
       <td style="white-space:nowrap;font-size:12px">${s['Start Time'] || '—'} – ${s['End Time'] || '—'}</td>
       <td style="font-weight:600">${s['Hours This Session'] || '—'}</td>
       <td style="max-width:160px;font-size:12px;color:var(--text-muted)">${s['Clinical Focus'] || '—'}</td>
-      <td><span class="badge ${badgeClass}">${status}</span>${s['Cancellation Requested'] && (status === 'Pending' || status === 'Approved') ? '<div style="font-size:11px;color:var(--amber);font-weight:700;margin-top:3px">⚑ Cancel requested</div>' : ''}</td>
+      <td>${statusBadge(status)}${s['Cancellation Requested'] && (status === 'Pending' || status === 'Approved') ? '<div style="font-size:11px;color:var(--amber);font-weight:700;margin-top:3px">⚑ Cancel requested</div>' : ''}</td>
       <td>
         <div class="progress-wrap">
           <div class="progress-bar-bg"><div class="progress-bar-fill ${fillClass}" style="width:${pct}%"></div></div>
@@ -2498,6 +2525,7 @@ function addRequestRow() {
 function removeRequestRow(i) {
   const el = container_lookup(i);
   if (el) el.remove();
+  updateRequestHoursPreview();
 }
 function container_lookup(i) {
   return document.querySelector(`#req-rows-container [data-row-index="${i}"]`);
@@ -2851,6 +2879,7 @@ function updateRotationHint() {
   hint.textContent = `Dates must fall between ${start} and ${end}` + (goal != null ? ` · up to ${Math.round(goal * 1.1 * 10) / 10} hours (${goal} paid + 10% buffer)` : '');
   const totalEl = document.getElementById('req-total');
   if (totalEl && goal != null) totalEl.value = goal;
+  updateRequestHoursPreview();
 }
 
 function openStudentRequestModal(prefillDate) {
@@ -2876,6 +2905,160 @@ function calcHours(start, end) {
   const [eh, em] = end.split(':').map(Number);
   return Math.round(((eh * 60 + em) - (sh * 60 + sm)) / 60 * 2) / 2;
 }
+
+// ── SHARED STATUS BADGES ─────────────────────────────
+// One mapping for every place a session or seat status is shown, so the
+// colors stay consistent (classes defined in the .badge-* CSS block).
+const SESSION_BADGE_CLASS = { Pending: 'badge-pending', Approved: 'badge-approved', Completed: 'badge-completed', Denied: 'badge-denied', Cancelled: 'badge-cancelled', 'No Show': 'badge-noshow' };
+const SEAT_BADGE_CLASS = { Confirmed: 'badge-confirmed', Standby: 'badge-standby', Released: 'badge-released' };
+function statusBadge(status, style) {
+  const st = status || 'Pending';
+  return `<span class="badge ${SESSION_BADGE_CLASS[st] || 'badge-pending'}"${style ? ` style="${style}"` : ''}>${escapeHtml(st)}</span>`;
+}
+function seatBadge(seat) {
+  if (!seat) return '—';
+  return `<span class="badge ${SEAT_BADGE_CLASS[seat] || 'badge-standby'}">${escapeHtml(seat)}</span>`;
+}
+
+// ── HOURS TRACKER MATH ───────────────────────────────
+// Calculated from individual Session records (never the Hours This Session
+// Rollup, which includes Denied sessions). Denied / Cancelled / No Show are
+// excluded from every total.
+//   Completed = Prior Hours + Completed sessions + Approved sessions dated before today
+//   Scheduled = Pending + Approved sessions dated today or later
+//   Remaining = Goal − Completed − Scheduled
+function localTodayISO() {
+  const d = new Date();
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+function computeRotationHours(rotation, allSessions) {
+  const ids = new Set(rotation['Sessions'] || []);
+  const today = localTodayISO();
+  let completed = typeof rotation['Prior Hours Completed'] === 'number' ? rotation['Prior Hours Completed'] : 0;
+  let scheduled = 0;
+  (allSessions || []).filter(s => ids.has(s.id)).forEach(s => {
+    const hrs = Number(s['Hours This Session']) || 0;
+    const st = s['Approval Status'] || 'Pending';
+    const date = s['Session Date'] || '';
+    if (st === 'Completed' || (st === 'Approved' && date && date < today)) completed += hrs;
+    else if ((st === 'Pending' || st === 'Approved') && date >= today) scheduled += hrs;
+  });
+  const goal = typeof rotation['Hours Goal'] === 'number' ? rotation['Hours Goal'] : null;
+  const round = n => Math.round(n * 10) / 10;
+  completed = round(completed); scheduled = round(scheduled);
+  return {
+    goal, completed, scheduled,
+    remaining: goal == null ? null : round(goal - completed - scheduled),
+    over: goal == null ? 0 : Math.max(0, round(completed + scheduled - goal)),
+  };
+}
+const COORDINATOR_EMAIL = 'coordinator@thepreceptorsite.com';
+function renderHoursTracker(h) {
+  if (h.goal == null) {
+    return `<div class="hrs-tracker"><div class="hrs-warn" style="color:#8A5300">Goal not set — contact <a href="mailto:${COORDINATOR_EMAIL}">${COORDINATOR_EMAIL}</a></div></div>`;
+  }
+  const denom = Math.max(h.goal, h.completed + h.scheduled) || 1;
+  const donePct = Math.min(100, h.completed / denom * 100);
+  const schedPct = Math.min(100 - donePct, h.scheduled / denom * 100);
+  const fmt = n => (Math.round(n * 10) / 10).toString();
+  return `<div class="hrs-tracker">
+    <div class="hrs-nums">
+      <div><div class="n">${fmt(h.goal)}</div><div class="lbl">Goal</div></div>
+      <div><div class="n">${fmt(h.scheduled)}</div><div class="lbl">Scheduled</div></div>
+      <div><div class="n">${fmt(h.completed)}</div><div class="lbl">Completed</div></div>
+      <div><div class="n">${fmt(Math.max(0, h.remaining))}</div><div class="lbl">Remaining</div></div>
+    </div>
+    <div class="hrs-bar" role="img" aria-label="${fmt(h.completed)} completed and ${fmt(h.scheduled)} scheduled of ${fmt(h.goal)} hours">
+      <div class="done" style="width:${donePct}%"></div><div class="sched" style="width:${schedPct}%"></div>
+    </div>
+    <div class="hrs-legend"><span><i style="background:#3B8BEB"></i>Completed</span><span><i style="background:#6EE7F2"></i>Scheduled</span></div>
+    ${h.over > 0 ? `<div class="hrs-warn">You are booked over your purchased hours by ${fmt(h.over)}. Please cancel sessions or contact <a href="mailto:${COORDINATOR_EMAIL}">${COORDINATOR_EMAIL}</a>.</div>` : ''}
+  </div>`;
+}
+
+// Returns `known` plus any session linked from these rotations that isn't
+// already in it, fetched by record ID (chunked to keep the formula short).
+async function loadRotationLinkedSessions(rotations, known) {
+  const have = new Set((known || []).map(s => s.id));
+  const missing = [...new Set(rotations.flatMap(r => r['Sessions'] || []))].filter(id => !have.has(id));
+  const extra = [];
+  for (let i = 0; i < missing.length; i += 40) {
+    const chunk = missing.slice(i, i + 40);
+    const formula = `OR(${chunk.map(id => `RECORD_ID()="${id}"`).join(',')})`;
+    const data = await atRead(STUDENTS_BASE_ID, TABLE_ID, `?filterByFormula=${encodeURIComponent(formula)}`);
+    if (data) extra.push(...(data.records || []).map(r => ({ id: r.id, ...r.fields })));
+  }
+  return [...(known || []), ...extra];
+}
+
+// ── ROTATION SUMMARY CARDS ───────────────────────────
+function firstVal(v) { return Array.isArray(v) ? (v.filter(Boolean).join(', ') || '') : (v || ''); }
+function renderRotationCards(rotations, allSessions) {
+  const el = document.getElementById('s-rotation-cards');
+  if (!el) return;
+  if (!rotations.length) { el.innerHTML = ''; return; }
+  const dash = v => (v === null || v === undefined || v === '') ? '—' : escapeHtml(String(v));
+  el.innerHTML = rotations.map(r => {
+    const h = computeRotationHours(r, allSessions);
+    const start = r['Requested Start Date'] ? formatDate(r['Requested Start Date']) : '—';
+    const end = r['Requested End Date'] ? formatDate(r['Requested End Date']) : '—';
+    const agreement = r['Contract Signed Date']
+      ? `Signed ${formatDate(r['Contract Signed Date'])}`
+      : '<span class="rot-unsigned">Not signed yet</span>';
+    return `<div class="rot-card">
+      <div class="rot-card-head">
+        <div style="min-width:0">
+          <div class="rot-card-title">${dash(r['Placement Label'] || r['Course Name'])}</div>
+          <div class="rot-card-sub">${dash(r['Semester / Quarter'])}</div>
+        </div>
+        <div style="text-align:right">${seatBadge(r['Seat Status'])}<div class="rot-card-sub">${dash(r['Pipeline Status'])}</div></div>
+      </div>
+      <div class="rot-card-grid">
+        <div><div class="lbl">School</div>${dash(firstVal(r['University (from Student)']) || firstVal(r['College/University']))}</div>
+        <div><div class="lbl">Course</div>${dash(r['Course Name'])}</div>
+        <div><div class="lbl">Rotation dates</div>${start} – ${end}</div>
+        <div><div class="lbl">Hours goal</div>${dash(r['Hours Goal'])}</div>
+        <div><div class="lbl">Payment</div>${dash(r['Payment Status'])}</div>
+        <div><div class="lbl">Agreement</div>${agreement}</div>
+      </div>
+      ${renderHoursTracker(h)}
+    </div>`;
+  }).join('');
+}
+
+// ── LIVE "THIS REQUEST ADDS X HOURS" LINE ────────────
+// Student mode only. Informational — never blocks the request; the
+// coordinator reviews anything over the goal.
+function requestHoursTotal() {
+  const rows = [{ d: 'req-date', s: 'req-start', e: 'req-end', h: 'req-hours' }];
+  document.querySelectorAll('#req-rows-container [data-row-index]').forEach(div => {
+    const i = div.dataset.rowIndex;
+    rows.push({ d: `req-date-${i}`, s: `req-start-${i}`, e: `req-end-${i}`, h: `req-hours-${i}` });
+  });
+  return rows.reduce((sum, r) => {
+    const date = document.getElementById(r.d)?.value;
+    if (!date) return sum;
+    const typed = parseFloat(document.getElementById(r.h)?.value);
+    return sum + (typed || calcHours(document.getElementById(r.s)?.value, document.getElementById(r.e)?.value) || 0);
+  }, 0);
+}
+function updateRequestHoursPreview() {
+  const el = document.getElementById('req-hours-preview');
+  if (!el) return;
+  const sel = document.getElementById('req-rotation');
+  const rot = (window._studentPortalRotations || []).find(r => sel && r.id === sel.value);
+  if (!requestModalStudentMode || !rot) { el.style.display = 'none'; return; }
+  const h = computeRotationHours(rot, window._studentPortalSessions || []);
+  const adds = Math.round(requestHoursTotal() * 10) / 10;
+  const booked = Math.round((h.completed + h.scheduled + adds) * 10) / 10;
+  const over = h.goal != null && booked > h.goal;
+  el.textContent = `This request adds ${adds} hours → ${booked} of ${h.goal != null ? h.goal : '—'} booked.` + (over ? ' This is over your purchased hours — your coordinator will review it.' : '');
+  el.style.display = 'block';
+  el.style.background = over ? '#FFF3D6' : 'var(--blue-light)';
+  el.style.color = over ? '#7A4A00' : 'var(--blue-dark)';
+}
+document.addEventListener('input', e => { if (e.target.closest && e.target.closest('#request-modal')) updateRequestHoursPreview(); });
+document.addEventListener('change', e => { if (e.target.closest && e.target.closest('#request-modal')) updateRequestHoursPreview(); });
 
 // Fetches every Rotation linked to this student once (used for both the
 // portal header's "current rotation" and the full Clinical Rotations tab),
@@ -2966,14 +3149,12 @@ async function viewRotationSessions(rotationId) {
       list.innerHTML = '<div style="padding:20px;text-align:center;color:var(--text-muted)">No sessions on file for this rotation.</div>';
       return;
     }
-    const badgeClassFor = { Pending: 'badge-pending', Approved: 'badge-approved', Denied: 'badge-denied', Cancelled: 'badge-cancelled', Completed: 'badge-completed', 'No Show': 'badge-noshow' };
     list.innerHTML = sessions.map(s => {
-      const badgeClass = badgeClassFor[s['Approval Status']] || 'badge-pending';
       return `
         <div style="border:1px solid var(--gray-100);border-radius:8px;padding:10px 14px;margin-bottom:8px;">
           <div style="display:flex;justify-content:space-between;align-items:flex-start;gap:10px;">
             <div style="font-weight:600;font-size:13px">${formatDate(s['Session Date'])}</div>
-            <span class="badge ${badgeClass}">${escapeHtml(s['Approval Status'] || 'Pending')}</span>
+            ${statusBadge(s['Approval Status'])}
           </div>
           <div style="font-size:12px;color:var(--text-muted);margin-top:2px">${escapeHtml(s['Start Time'] || '?')} – ${escapeHtml(s['End Time'] || '?')} · ${s['Hours This Session'] ?? '?'} hrs</div>
           ${s['Clinical Focus'] ? `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${escapeHtml(s['Clinical Focus'])}</div>` : ''}
@@ -3010,7 +3191,7 @@ function renderRotationsTab(rotations) {
     const start = r['Requested Start Date'] ? formatDate(r['Requested Start Date']) : '—';
     const end = r['Requested End Date'] ? formatDate(r['Requested End Date']) : '—';
     const goal = r['Hours Goal'] != null ? r['Hours Goal'] : '—';
-    const done = r['Total Hours'] != null ? r['Total Hours'] : 0;
+    const done = computeRotationHours(r, window._studentPortalSessions || []).completed;
     const status = r['Pipeline Status'] || '—';
     const focus = r['Clinical Focus / Objectives'] || '';
     return `
@@ -3024,7 +3205,7 @@ function renderRotationsTab(rotations) {
           <div><div style="color:var(--text-muted);font-size:11px">End date</div>${end}</div>
           <div><div style="color:var(--text-muted);font-size:11px">Hours goal</div>${goal}</div>
           <div><div style="color:var(--text-muted);font-size:11px">Hours logged</div>${done}</div>
-          <div><div style="color:var(--text-muted);font-size:11px">Status</div>${status}</div>
+          <div><div style="color:var(--text-muted);font-size:11px">Status</div>${seatBadge(r['Seat Status'])} <span style="font-size:12px;color:var(--text-muted)">${escapeHtml(status)}</span></div>
         </div>
         ${focus ? `<div style="margin-top:8px;font-size:12px;color:var(--text-muted)"><strong style="color:var(--text-body)">Focus:</strong> ${focus}</div>` : ''}
         <div style="margin-top:10px;display:flex;gap:8px;flex-wrap:wrap;">
@@ -3127,13 +3308,16 @@ async function lookupStudent() {
     ? rotation['Hours Goal']
     : (studentRecord['Total Hours Required'] || 0);
 
-  const signedOffDone = sessions.filter(s => s['Hours Signed Off']).reduce((a,s) => a + (s['Hours Signed Off'] || 0), 0);
-  const priorHours = (rotation && typeof rotation['Prior Hours Completed'] === 'number')
-    ? rotation['Prior Hours Completed']
-    : (studentRecord['Prior Hours Completed'] || 0);
-
-  const totalDone = signedOffDone + priorHours;
-  const pct = totalReq ? Math.min(100, Math.round(totalDone / totalReq * 100)) : 0;
+  // The tracker counts each rotation's own linked Sessions — some are tagged
+  // to an older Students record and aren't in the email/ID-matched list above.
+  const trackerSessions = await loadRotationLinkedSessions(rotations, sessions);
+  window._studentPortalSessions = trackerSessions;
+  // Header numbers use the same Hours Tracker math as the rotation cards
+  // (Completed = Prior Hours + Completed/past-Approved sessions).
+  const currentHours = rotation ? computeRotationHours(rotation, trackerSessions) : null;
+  const goalSet = !!(currentHours && currentHours.goal != null);
+  const totalDone = currentHours ? currentHours.completed : 0;
+  const pct = (goalSet && totalReq) ? Math.min(100, Math.round(totalDone / totalReq * 100)) : 0;
   const studentName = studentRecord['Student Name'] || val;
   document.getElementById('s-name').textContent = studentName;
   const studentIdLabel = studentRecord['Student ID'] ? `ID ${studentRecord['Student ID']}` : 'ID not on file';
@@ -3146,10 +3330,13 @@ async function lookupStudent() {
   }
   document.getElementById('s-meta').textContent = `${studentIdLabel} · ${courseLabel} · ${studentRecord['University / College'] || 'University not set'} · ${totalReq} hours required`;
   renderRotationsTab(rotations);
+  renderRotationCards(rotations, trackerSessions);
   document.getElementById('s-hours-done').textContent = totalDone.toFixed(1);
-  document.getElementById('s-hours-left').textContent = Math.max(0, totalReq - totalDone).toFixed(1);
+  document.getElementById('s-hours-left').textContent = goalSet ? Math.max(0, currentHours.remaining).toFixed(1) : '—';
   document.getElementById('s-progress-bar').style.width = pct + '%';
-  document.getElementById('s-progress-label').textContent = `${totalDone.toFixed(1)} of ${totalReq} hours complete (${pct}%)`;
+  document.getElementById('s-progress-label').textContent = goalSet
+    ? `${totalDone.toFixed(1)} of ${totalReq} hours complete (${pct}%) · ${currentHours.scheduled.toFixed(1)} scheduled`
+    : `Goal not set — contact ${COORDINATOR_EMAIL}`;
 
   // Store globals for student portal features
   window._studentPortalEmail = studentRecord['Email'] || val;
@@ -3161,7 +3348,7 @@ async function lookupStudent() {
 
   // Pace tracker
   const lastDate = sessions.length ? sessions[sessions.length - 1]['Session Date'] : ((rotation && rotation['Requested End Date']) || null);
-  renderPaceTracker(totalDone, totalReq, lastDate);
+  renderPaceTracker(totalDone, goalSet ? totalReq : 0, lastDate);
 
   // Completion certificate button
   const certBtn = document.getElementById('s-cert-download');
@@ -3183,7 +3370,6 @@ async function lookupStudent() {
   const list = document.getElementById('student-sessions-list');
   list.innerHTML = sessions.map(s => {
     const status = s['Approval Status'] || 'Pending';
-    const badgeClass = { Pending:'badge-pending', Approved:'badge-approved', Denied:'badge-denied', Cancelled:'badge-cancelled', Completed:'badge-completed', 'No Show':'badge-noshow' }[status] || 'badge-pending';
     const d = s['Session Date'] ? new Date(s['Session Date'] + 'T12:00:00') : null;
     const month = d ? d.toLocaleString('default', { month: 'short' }).toUpperCase() : '—';
     const day = d ? d.getDate() : '—';
@@ -3218,7 +3404,7 @@ async function lookupStudent() {
         ${cancelBtn}
       </div>
       <div class="session-status-col">
-        <span class="badge ${badgeClass}">${status}</span>
+        ${statusBadge(status)}
       </div>
     </div>`;
   }).join('');
@@ -4485,7 +4671,7 @@ function renderDay() {
         <div class="day-time" style="border-left:3px solid ${col};padding-left:10px">
           <div>${s['Start Time']||'—'}</div>
           <div style="font-size:10px;color:var(--text-muted)">${s['End Time']||''}</div>
-          <div style="margin-top:4px"><span class="badge badge-${s['Approval Status']==='Approved'?'approved':s['Approval Status']==='Pending'?'pending':s['Approval Status']==='Completed'?'completed':'denied'}" style="font-size:10px">${s['Approval Status']}</span></div>
+          <div style="margin-top:4px">${statusBadge(s['Approval Status'], 'font-size:10px')}</div>
         </div>
         <div>
           <div class="day-student">${s['Student Name']||'—'}</div>
@@ -5252,7 +5438,7 @@ function renderCancelRequests() {
     <td><div style="font-weight:600">${escapeHtml(s['Student Name'] || '—')}</div><div style="font-size:11px;color:var(--text-muted)">${escapeHtml(s['Student Email'] || '')}</div></td>
     <td style="font-size:12px">${formatDate(s['Session Date'])}<div style="color:var(--text-muted)">${escapeHtml(s['Start Time'] || '—')} – ${escapeHtml(s['End Time'] || '—')}</div></td>
     <td>${s['Hours This Session'] || '—'}</td>
-    <td><span class="badge ${s['Approval Status'] === 'Approved' ? 'badge-approved' : 'badge-pending'}">${s['Approval Status']}</span></td>
+    <td>${statusBadge(s['Approval Status'])}</td>
     <td style="white-space:nowrap">
       <button class="btn btn-success btn-sm" onclick="resolveCancelRequest('${s.id}', true)">✓ Approve cancellation</button>
       <button class="btn btn-sm" onclick="resolveCancelRequest('${s.id}', false)">Decline</button>
