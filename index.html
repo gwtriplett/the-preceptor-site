@@ -224,6 +224,15 @@
   @media (max-width: 420px) {
     .brand-name { display: none; }
   }
+  /* Student lookup + header hours row stack on phones */
+  @media (max-width: 600px) {
+    .lookup-row { flex-wrap: wrap; }
+    .lookup-row .form-group { flex: 1 1 100% !important; }
+    .lookup-row .btn { flex: 1 1 0; white-space: nowrap; }
+    .hours-ring-wrap { flex-wrap: wrap; gap: 12px; }
+    .hours-ring-wrap .hours-progress-col { order: 3; flex: 1 1 100% !important; }
+    .hours-ring-wrap > div:last-child { margin-left: auto; }
+  }
 
   /* ── CALENDAR ── */
   .cal-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:16px; flex-wrap:wrap; gap:10px; }
@@ -846,7 +855,7 @@
     <div class="section-head" style="margin-bottom:12px">
       <span class="section-title">Student Portal</span>
     </div>
-    <div style="display:flex;gap:10px;align-items:flex-end">
+    <div class="lookup-row" style="display:flex;gap:10px;align-items:flex-end">
       <div class="form-group" style="flex:1;margin:0">
         <label>Email address or Student ID</label>
         <input type="text" id="student-email-lookup" placeholder="email@university.edu  or  26-XXXX" autocomplete="off" />
@@ -872,7 +881,7 @@
           <div class="hours-big" id="s-hours-done">0</div>
           <div class="hours-detail">hours completed</div>
         </div>
-        <div style="flex:1">
+        <div class="hours-progress-col" style="flex:1">
           <div class="portal-progress-bg">
             <div class="portal-progress-fill" id="s-progress-bar" style="width:0%"></div>
           </div>
