@@ -1,5 +1,7 @@
 import type { Context, Config } from "@netlify/functions";
 import PDFDocument from "pdfkit";
+import { verifyStaffPass, unauthorized } from "./lib/staff-auth.mts";
+import { resolveStudent, ownsRotation } from "./lib/student-identity.mts";
 
 const BASE_ID = "appf6D9Nbhb5Wg43L";
 const ROTATIONS_TABLE_ID = "tbl6l75OeBLNzSp0i";
@@ -38,9 +40,9 @@ function pdfToBuffer(draw: (doc: PDFKit.PDFDocument) => void): Promise<Buffer> {
   });
 }
 
-// This endpoint is read-only and unauthenticated, matching airtable-read.mts —
-// it only ever produces a PDF from data already visible in the student
-// portal / staff scheduler, nothing more sensitive than that.
+// Read-only. Opened as a plain link, so access is checked from the query
+// string: a staff pass (pass=) or the email / Student ID of the student the
+// rotation belongs to (student=).
 export default async (req: Request, context: Context) => {
   const url = new URL(req.url);
   const rotationId = (url.searchParams.get("rotationId") || "").trim();
@@ -62,6 +64,12 @@ export default async (req: Request, context: Context) => {
       return new Response(JSON.stringify({ error: rotation?.error?.message || "Rotation not found." }), { status: rotResp.status });
     }
     const rf = rotation.fields || {};
+
+    // Staff (pass=) or the student this rotation belongs to (student=).
+    if (!verifyStaffPass(url.searchParams.get("pass"))) {
+      const who = await resolveStudent(token, url.searchParams.get("student")).catch(() => null);
+      if (!who || !ownsRotation(who, rotationId, rf)) return unauthorized();
+    }
 
     let studentName = rf["Placement Label"] || "";
     const studentIds: string[] = rf["Student"] || [];

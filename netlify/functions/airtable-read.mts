@@ -1,4 +1,5 @@
 import type { Context, Config } from "@netlify/functions";
+import { verifyStaffPass, unauthorized } from "./lib/staff-auth.mts";
 
 // Only this base can ever be touched through this function —
 // prevents this proxy from being used to reach any other Airtable data.
@@ -18,7 +19,11 @@ export default async (req: Request, context: Context) => {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 });
   }
 
-  const { base, table, path } = payload || {};
+  const { base, table, path, staffPass } = payload || {};
+
+  // Staff only. The student portal reads through student-read instead,
+  // which only ever returns the signed-in student's own records.
+  if (!verifyStaffPass(staffPass)) return unauthorized();
 
   if (!base || !ALLOWED_BASES[base]) {
     return new Response(JSON.stringify({ error: "Base not allowed" }), { status: 403 });

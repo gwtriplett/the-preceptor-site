@@ -118,19 +118,27 @@
 
 <script>
 /* ============================================================
-   STAFF PASSWORD
-   This must match the STAFF_PASSWORD environment variable set
-   in Netlify (Site settings > Environment variables) — that's
-   what the airtable-write function checks before allowing any
-   changes. If you change one, change the other to match.
+   STAFF SIGN-IN
+   The password is checked on the server (staff-login, against the
+   STAFF_PASSWORD environment variable in Netlify). A correct password
+   returns a signed staff pass, sent with every read and write below.
    ============================================================ */
-const STAFF_PASSWORD = "ChangeMe123!";
-let staffPasswordEntered = "";
+let staffPass = "";
 
-function tryLogin(){
+async function tryLogin(){
   const val = document.getElementById('pwInput').value;
-  if(val === STAFF_PASSWORD){
-    staffPasswordEntered = val;
+  let pass = null;
+  try {
+    const resp = await fetch('/.netlify/functions/staff-login', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ password: val })
+    });
+    const data = await resp.json().catch(() => ({}));
+    if (resp.ok && data.pass) pass = data.pass;
+  } catch (e) { console.error(e); }
+  if(pass){
+    staffPass = pass;
     document.getElementById('gate').style.display = 'none';
     document.getElementById('app').style.display = 'block';
     loadSubmissions();
@@ -153,7 +161,7 @@ async function airtableRead(table, path){
   const resp = await fetch('/.netlify/functions/airtable-read', {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ base: STUDENTS_BASE_ID, table, path })
+    body: JSON.stringify({ staffPass, base: STUDENTS_BASE_ID, table, path })
   });
   const data = await resp.json();
   if(!resp.ok){ throw new Error(data?.error?.message || data?.error || `Server error (${resp.status})`); }
@@ -335,7 +343,7 @@ async function markContacted(id){
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        staffPassword: staffPasswordEntered,
+        staffPass,
         base: STUDENTS_BASE_ID,
         table: ROTATIONS_TABLE_ID,
         method: 'PATCH',

@@ -1,4 +1,5 @@
 import type { Context, Config } from "@netlify/functions";
+import { verifyStaffPass, unauthorized } from "./lib/staff-auth.mts";
 
 const ALLOWED_BASES: Record<string, true> = {
   "appf6D9Nbhb5Wg43L": true, // Student Management (also houses Sessions, co-located)
@@ -17,17 +18,10 @@ export default async (req: Request, context: Context) => {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 });
   }
 
-  const { staffPassword, base, table, method = "GET", path, body } = payload || {};
+  const { staffPass, base, table, method = "GET", path, body } = payload || {};
 
-  // Gate: only requests that include the correct staff password get write access.
-  // This is the same password staff use to log into the scheduler.
-  const expectedPassword = Netlify.env.get("STAFF_PASSWORD");
-  if (!expectedPassword) {
-    return new Response(JSON.stringify({ error: "Server is missing STAFF_PASSWORD. Set it in Netlify Site settings > Environment variables." }), { status: 500 });
-  }
-  if (!staffPassword || staffPassword !== expectedPassword) {
-    return new Response(JSON.stringify({ error: "Not authorized." }), { status: 401 });
-  }
+  // Gate: only requests carrying a valid staff pass (from staff-login) get write access.
+  if (!verifyStaffPass(staffPass)) return unauthorized();
 
   if (!base || !ALLOWED_BASES[base]) {
     return new Response(JSON.stringify({ error: "Base not allowed" }), { status: 403 });

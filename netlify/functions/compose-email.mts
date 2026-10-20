@@ -1,4 +1,6 @@
 import type { Context, Config } from "@netlify/functions";
+import { verifyStaffPass, unauthorized } from "./lib/staff-auth.mts";
+import { resolveStudent } from "./lib/student-identity.mts";
 
 export default async (req: Request, context: Context) => {
   if (req.method !== "POST") {
@@ -12,9 +14,20 @@ export default async (req: Request, context: Context) => {
     return new Response(JSON.stringify({ error: "Invalid JSON body" }), { status: 400 });
   }
 
-  const { toEmail, subject, bodyText, fromName, clinicName } = input || {};
+  const { toEmail, subject, bodyText, fromName, clinicName, staffPass, student } = input || {};
   if (!toEmail || !subject || !bodyText) {
     return new Response(JSON.stringify({ error: "toEmail, subject, and bodyText are required." }), { status: 400 });
+  }
+  if (String(bodyText).length > 8000 || String(subject).length > 300) {
+    return new Response(JSON.stringify({ error: "Message is too long." }), { status: 400 });
+  }
+
+  // Uses the site's Anthropic key, so only staff or a real student on file
+  // (the portal's notifications to the coordinator) may call it.
+  if (!verifyStaffPass(staffPass)) {
+    const airtableToken = Netlify.env.get("AIRTABLE_TOKEN");
+    const who = airtableToken ? await resolveStudent(airtableToken, student).catch(() => null) : null;
+    if (!who || !who.studentIds.size) return unauthorized();
   }
 
   const apiKey = Netlify.env.get("ANTHROPIC_API_KEY");
