@@ -51,8 +51,9 @@ export async function resolveStudent(token: string, raw: unknown): Promise<Stude
   if (!val || val.length > 200) return null;
 
   const emails = new Set<string>();
+  let byId: any[] = [];
   if (STUDENT_ID_RE.test(val)) {
-    const byId = await listAll(token, STUDENTS_TABLE_ID, `LOWER({Student ID})="${val}"`);
+    byId = await listAll(token, STUDENTS_TABLE_ID, `LOWER({Student ID})="${val}"`);
     byId.forEach((r) => splitEmails(r.fields?.["Email"]).forEach((e) => emails.add(e)));
     if (!emails.size) {
       // A Student ID with no email on file still owns its own record(s).
@@ -69,8 +70,15 @@ export async function resolveStudent(token: string, raw: unknown): Promise<Stude
   }
 
   // Every Students record under those emails (a student can have several).
-  const formula = `OR(${[...emails].map((e) => `LOWER({Email})="${formulaSafe(e)}"`).join(",")})`;
-  const records = await listAll(token, STUDENTS_TABLE_ID, formula);
+  // The Email field can hold several addresses ("a@x.edu; b@y.com"), so the
+  // formula does a loose substring match and the exact per-address check
+  // happens here, so "ann@x.com" doesn't also claim "joann@x.com".
+  const formula = `OR(${[...emails].map((e) => `FIND("${formulaSafe(e)}",LOWER({Email}))`).join(",")})`;
+  const records = [
+    ...byId,
+    ...(await listAll(token, STUDENTS_TABLE_ID, formula))
+      .filter((r) => splitEmails(r.fields?.["Email"]).some((e) => emails.has(e))),
+  ];
   return {
     emails,
     studentIds: new Set(records.map((r) => r.id)),
