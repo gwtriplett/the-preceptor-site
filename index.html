@@ -416,18 +416,6 @@
   /* Message box */
   .msg-sent { background:var(--green-light); border:1px solid #97C459; border-radius:8px; padding:12px 16px; font-size:13px; color:var(--green); margin-top:10px; display:none; }
 
-  /* Doc status rows */
-  .doc-row { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:10px 0; border-bottom:1px solid var(--gray-100); }
-  .doc-row:last-child { border-bottom:none; }
-  .doc-label { font-size:13px; font-weight:500; color:var(--text); }
-  .doc-sub { font-size:11px; color:var(--text-muted); margin-top:2px; }
-  .doc-status { display:flex; align-items:center; gap:6px; font-size:12px; font-weight:500; white-space:nowrap; }
-  .doc-status.verified { color:var(--green); }
-  .doc-status.pending { color:var(--amber); }
-  .doc-status.missing { color:var(--red); }
-  .doc-input-row { display:flex; gap:8px; align-items:center; margin-top:6px; }
-  .doc-input-row input { flex:1; font-size:12px; }
-
   /* Contact update */
   .update-field-row { display:grid; grid-template-columns:1fr 1fr; gap:10px; margin-bottom:10px; }
   .update-notice { background:var(--blue-light); border:1px solid #B5D4F4; border-radius:8px; padding:10px 14px; font-size:12px; color:var(--blue-dark); margin-bottom:14px; }
@@ -437,7 +425,6 @@
   .cancel-session-btn:hover { background:var(--red-light); }
 
   /* Objectives */
-  .objectives-box { background:var(--gray-50); border:1px solid var(--gray-100); border-radius:8px; padding:12px 14px; font-size:13px; color:var(--text-muted); line-height:1.6; white-space:pre-wrap; }
 
   /* Pace tracker */
   .pace-card { background:var(--white); border:1px solid var(--gray-100); border-radius:var(--radius); padding:14px 18px; margin-bottom:16px; display:flex; align-items:center; gap:16px; }
@@ -447,7 +434,6 @@
   .pace-ahead { border-left:4px solid var(--blue); }
 
   /* Agreement link */
-  .agreement-link-card { background:var(--blue-light); border:1px solid #B5D4F4; border-radius:var(--radius); padding:14px 18px; display:flex; align-items:center; gap:12px; margin-bottom:16px; }
 
   /* Cert download */
   .cert-download-card { background:var(--teal-light); border:1px solid #5DCAA5; border-radius:var(--radius); padding:14px 18px; display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:16px; }
@@ -863,10 +849,6 @@
       <button class="btn btn-primary" onclick="lookupStudent()">Find my portal</button>
       <button class="btn btn-primary btn-sm" onclick="openModal('request-modal')">+ Request a session</button>
     </div>
-    <div style="font-size:11px;color:var(--text-muted);margin-top:6px">
-      Student ID format: <span style="font-family:monospace;background:var(--gray-50);border:1px solid var(--gray-100);border-radius:4px;padding:1px 6px">YY-XXXX</span>
-      &nbsp;e.g. <span style="font-family:monospace;background:var(--gray-50);border:1px solid var(--gray-100);border-radius:4px;padding:1px 6px">26-2123</span>
-    </div>
   </div>
 
   <!-- STUDENT RESULTS -->
@@ -912,14 +894,11 @@
     <!-- PORTAL TABS -->
     <div class="portal-tabs">
       <div class="portal-tab active" onclick="setPortalTab('sessions', this)">My Sessions</div>
-      <div class="portal-tab" onclick="setPortalTab('docs', this)">Documents</div>
-      <div class="portal-tab" onclick="setPortalTab('objectives', this)">My Objectives</div>
       <div class="portal-tab" onclick="setPortalTab('contact', this)">Update Info</div>
       <div class="portal-tab" onclick="setPortalTab('message', this)">Message Coordinator</div>
       <div class="portal-tab" onclick="setPortalTab('availability', this)">My Availability</div>
       <div class="portal-tab" onclick="setPortalTab('rotations', this)">Clinical Rotations</div>
       <div class="portal-tab" onclick="setPortalTab('policies', this)">Scheduling Policies</div>
-      <div class="portal-tab" onclick="setPortalTab('newrotation', this)">Request New Rotation</div>
     </div>
 
     <!-- TAB: SESSIONS -->
@@ -929,92 +908,6 @@
         <button class="btn btn-primary btn-sm" onclick="openStudentRequestModal()">+ Request a session</button>
       </div>
       <div id="student-sessions-list"></div>
-    </div>
-
-    <!-- TAB: DOCUMENTS -->
-    <div id="ptab-docs" style="display:none">
-      <div class="card">
-        <div class="section-head" style="margin-bottom:14px">
-          <span class="section-title">Required documents</span>
-          <span style="font-size:12px;color:var(--text-muted)">All 4 required before your start date</span>
-        </div>
-        <div class="update-notice">Paste the Google Drive or shared link to each document below. Staff will review and mark as verified.</div>
-
-        <div class="doc-row">
-          <div style="flex:1">
-            <div class="doc-label">Background check</div>
-            <div class="doc-sub">Documented proof of criminal background check</div>
-            <div class="doc-input-row">
-              <input type="url" id="doc-bg" placeholder="Paste Google Drive link..." />
-              <button class="btn btn-sm btn-primary" onclick="submitDoc('bg', 'Background Check', document.getElementById('doc-bg').value)">Submit</button>
-            </div>
-          </div>
-          <div class="doc-status" id="doc-status-bg"><span style="color:var(--text-muted)">— Not submitted</span></div>
-        </div>
-
-        <div class="doc-row">
-          <div style="flex:1">
-            <div class="doc-label">Immunization records</div>
-            <div class="doc-sub">Health immunity documentation per TMM requirements</div>
-            <div class="doc-input-row">
-              <input type="url" id="doc-immune" placeholder="Paste Google Drive link..." />
-              <button class="btn btn-sm btn-primary" onclick="submitDoc('immune', 'Immunization Records', document.getElementById('doc-immune').value)">Submit</button>
-            </div>
-          </div>
-          <div class="doc-status" id="doc-status-immune"><span style="color:var(--text-muted)">— Not submitted</span></div>
-        </div>
-
-        <div class="doc-row">
-          <div style="flex:1">
-            <div class="doc-label">Professional liability insurance</div>
-            <div class="doc-sub">Min. $1M per occurrence / $6M annual aggregate</div>
-            <div class="doc-input-row">
-              <input type="url" id="doc-ins" placeholder="Paste Google Drive link..." />
-              <button class="btn btn-sm btn-primary" onclick="submitDoc('ins', 'Insurance Certificate', document.getElementById('doc-ins').value)">Submit</button>
-            </div>
-          </div>
-          <div class="doc-status" id="doc-status-ins"><span style="color:var(--text-muted)">— Not submitted</span></div>
-        </div>
-
-        <div class="doc-row">
-          <div style="flex:1">
-            <div class="doc-label">School practicum handbook</div>
-            <div class="doc-sub">Course handbook, preceptor manual, or syllabus</div>
-            <div class="doc-input-row">
-              <input type="url" id="doc-handbook" placeholder="Paste Google Drive link..." />
-              <button class="btn btn-sm btn-primary" onclick="submitDoc('handbook', 'School Handbook', document.getElementById('doc-handbook').value)">Submit</button>
-            </div>
-          </div>
-          <div class="doc-status" id="doc-status-handbook"><span style="color:var(--text-muted)">— Not submitted</span></div>
-        </div>
-
-        <div id="doc-sent-msg" class="msg-sent">✓ Document link submitted. Staff will review and mark as verified.</div>
-      </div>
-
-      <!-- SIGNED AGREEMENT LINK -->
-      <div class="agreement-link-card" style="margin-top:14px">
-        <div style="font-size:22px">📄</div>
-        <div style="flex:1">
-          <div style="font-weight:600;font-size:13px;color:var(--blue-dark)">Your preceptorship agreement</div>
-          <div style="font-size:12px;color:var(--text-muted);margin-top:2px">Contact your coordinator to receive a copy of your signed agreement if you need it for your program.</div>
-        </div>
-        <button class="btn btn-teal btn-sm" onclick="setPortalTab('message', document.querySelectorAll('.portal-tab')[4]); document.getElementById('msg-text').value='Hi, could you please send me a copy of my signed preceptorship agreement? I need it for my program.'">Request a copy</button>
-      </div>
-    </div>
-
-    <!-- TAB: OBJECTIVES -->
-    <div id="ptab-objectives" style="display:none">
-      <div class="card">
-        <div class="section-head" style="margin-bottom:14px">
-          <span class="section-title">My learning objectives</span>
-          <span style="font-size:12px;color:var(--text-muted)">From your intake form</span>
-        </div>
-        <div id="s-objectives-text" class="objectives-box" style="margin-bottom:14px">Loading...</div>
-        <div style="font-size:12px;color:var(--text-muted);margin-bottom:10px">Need to update your objectives for a new semester? Send a message to your coordinator.</div>
-        <button class="btn btn-sm btn-primary" onclick="setPortalTab('message', document.querySelectorAll('.portal-tab')[4]); document.getElementById('msg-text').value='Hi, I would like to update my clinical learning objectives for this rotation. My updated objectives are:
-
-'">Update my objectives</button>
-      </div>
     </div>
 
     <!-- TAB: UPDATE CONTACT INFO -->
@@ -1115,6 +1008,7 @@
     <div id="ptab-rotations" style="display:none">
       <div class="section-head" style="margin-bottom:14px">
         <span class="section-title">Your clinical rotation history</span>
+        <button class="btn btn-primary btn-sm" onclick="setPortalTab('newrotation', document.querySelector('.portal-tab.active'))">+ Request new rotation</button>
       </div>
       <div id="rotations-list">
         <div class="empty" style="padding:20px;text-align:center;color:var(--text-muted)">Loading...</div>
@@ -1143,6 +1037,7 @@
       <div class="card">
         <div class="section-head" style="margin-bottom:14px">
           <span class="section-title">Request a new clinical rotation period</span>
+          <button class="btn btn-sm" onclick="setPortalTab('rotations', document.querySelector('.portal-tab.active'))">← Back to rotations</button>
         </div>
         <p style="font-size:13px;color:var(--text-muted);margin-bottom:14px">
           Starting a new semester, course, or additional clinical period? Fill this out and your coordinator will review it. This does not log individual hours — use "My Sessions" for that once your rotation is approved.
@@ -3394,16 +3289,6 @@ async function lookupStudent() {
   const certBtn = document.getElementById('s-cert-download');
   if (certBtn) certBtn.style.display = (pct >= 100 && totalDone > 0) ? 'flex' : 'none';
 
-  // Load objectives — prefer the most recent session's, fall back to the Students record's on file
-  const objEl = document.getElementById('s-objectives-text');
-  if (objEl) {
-    const sessionFocus = sessions.length ? sessions[sessions.length - 1]['Clinical Focus'] : '';
-    objEl.textContent = sessionFocus || studentRecord['Clinical Focus / Objectives'] || 'No learning objectives on file. Contact your coordinator to update.';
-  }
-
-  // Render doc submission statuses
-  renderDocStatuses();
-
   // Reset to sessions tab
   setPortalTab('sessions', document.querySelector('.portal-tab'));
 
@@ -3462,7 +3347,7 @@ function setPortalTab(tab, el) {
       row.scrollLeft = el.offsetLeft - (row.clientWidth - el.offsetWidth) / 2;
     }
   }
-  ['sessions','docs','objectives','contact','message','availability','rotations','policies','newrotation'].forEach(t => {
+  ['sessions','contact','message','availability','rotations','policies','newrotation'].forEach(t => {
     const el = document.getElementById('ptab-' + t);
     if (el) el.style.display = t === tab ? 'block' : 'none';
   });
@@ -3497,46 +3382,6 @@ function renderPaceTracker(totalDone, totalReq, endDateStr) {
       <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${totalDone.toFixed(1)} of ${totalReq} hrs completed · ${pct}% · ${daysLeft} days until end date</div>
     </div>
   </div>`;
-}
-
-// ── PORTAL TABS: DOC SUBMISSION ──────────────────────
-function submitDoc(key, label, url) {
-  if (!url || !url.startsWith('http')) { alert('Please paste a valid link starting with http.'); return; }
-  const stored = JSON.parse(localStorage.getItem('student_docs_' + window._studentPortalEmail) || '{}');
-  stored[key] = { url, label, submitted: new Date().toLocaleDateString(), verified: false };
-  localStorage.setItem('student_docs_' + window._studentPortalEmail, JSON.stringify(stored));
-  renderDocStatuses();
-  const msg = document.getElementById('doc-sent-msg');
-  msg.style.display = 'block';
-  setTimeout(() => msg.style.display = 'none', 4000);
-  // Also notify coordinator via email
-  const cfg = getEmailConfig();
-  if (hasValidCoordinatorEmail(cfg)) {
-    sendEmailViaClaudeAPI(cfg.fromEmail,
-      `Document submitted: ${label} — ${window._studentPortalName}`,
-      `${window._studentPortalName} has submitted a document link for coordinator review.
-
-Document: ${label}
-Link: ${url}
-Student Email: ${window._studentPortalEmail}
-
-Please review and update the student's verification status in Airtable.`
-    );
-  }
-}
-
-function renderDocStatuses() {
-  const stored = JSON.parse(localStorage.getItem('student_docs_' + window._studentPortalEmail) || '{}');
-  const map = { bg:'Background Check', immune:'Immunization Records', ins:'Insurance Certificate', handbook:'School Handbook' };
-  Object.entries(map).forEach(([key, label]) => {
-    const el = document.getElementById('doc-status-' + key);
-    if (!el) return;
-    if (stored[key]) {
-      el.innerHTML = `<span class="doc-status pending">⏳ Submitted ${stored[key].submitted}</span>`;
-    } else {
-      el.innerHTML = `<span style="color:var(--text-muted);font-size:12px">— Not submitted</span>`;
-    }
-  });
 }
 
 // ── STUDENT AVAILABILITY ──────────────────────────────
