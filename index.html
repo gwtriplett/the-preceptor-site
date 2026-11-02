@@ -333,16 +333,6 @@
   .cap-full { background:var(--red-light); color:var(--red); }
   .cap-open { background:var(--green-light); color:var(--green); }
 
-  /* ── HOURS AT RISK ── */
-  .risk-banner { background:var(--red-light); border:1px solid #F09595; border-radius:var(--radius); padding:14px 18px; margin-bottom:16px; }
-  .risk-banner-title { font-size:13px; font-weight:600; color:var(--red); margin-bottom:10px; display:flex; align-items:center; gap:6px; }
-  .risk-card { background:var(--white); border:1px solid #F09595; border-radius:8px; padding:10px 14px; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; gap:12px; }
-  .risk-card:last-child { margin-bottom:0; }
-  .risk-name { font-weight:600; font-size:13px; }
-  .risk-detail { font-size:11px; color:var(--text-muted); margin-top:2px; }
-  .risk-pill { font-size:11px; font-weight:600; padding:3px 10px; border-radius:20px; white-space:nowrap; }
-  .risk-critical { background:var(--red-light); color:var(--red); }
-  .risk-warn { background:var(--amber-light); color:var(--amber); }
 
   /* ── REVENUE DASHBOARD ── */
   .rev-grid { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin-bottom:20px; }
@@ -767,7 +757,6 @@
     </div>
   </div>
 
-  <div id="risk-banner-container"></div>
 
   <!-- CANCELLATION REQUESTS (hidden when there are none) -->
   <div class="card" id="cancel-requests-card" style="display:none;margin-bottom:16px;border:1.5px solid var(--amber)">
@@ -3730,63 +3719,6 @@ document.addEventListener('DOMContentLoaded', () => {
 });
 
 // ══════════════════════════════════════════════════════════════
-// FEATURE 1: HOURS-AT-RISK ALERTS
-// ══════════════════════════════════════════════════════════════
-function computeAtRisk(sessions) {
-  const today = new Date(); today.setHours(0,0,0,0);
-  const byStudent = {};
-  sessions.forEach(s => {
-    const key = s['Student Email'] || s['Student Name'];
-    if (!key) return;
-    if (!byStudent[key]) byStudent[key] = { name: s['Student Name'], email: s['Student Email'], uni: s['University'], totalReq: s['Total Hours Required'] || 0, endDate: s['Session Date'], signedOff: 0, scheduled: 0, rotationIds: new Set() };
-    const rec = byStudent[key];
-    (s['Rotation'] || []).forEach(id => rec.rotationIds.add(id));
-    if (s['Approval Status'] === 'Completed' && s['Hours Signed Off']) rec.signedOff += s['Hours Signed Off'];
-    if (['Approved','Pending'].includes(s['Approval Status'])) rec.scheduled += s['Hours This Session'] || 0;
-    // find latest session date as proxy end date from Students table — use session dates
-  });
-  const risks = [];
-  Object.values(byStudent).forEach(rec => {
-    if (!rec.totalReq) return;
-    // Prior Hours Completed lives on the Rotation — use the one the student's
-    // sessions are linked to, else their current rotation.
-    const stu = studentDirectory.find(d => d['Email'] === rec.email);
-    const rots = rotationsFor(stu);
-    const rot = rots.find(r => rec.rotationIds.has(r.id)) || pickCurrentRotation(rots);
-    const priorHours = (rot && rot['Prior Hours Completed']) || 0;
-    const remaining = rec.totalReq - rec.signedOff - priorHours;
-    if (remaining <= 0) return; // done
-    const daysLeft = Math.ceil((new Date(rec.endDate + 'T12:00:00') - today) / 86400000);
-    const hoursPerDayNeeded = daysLeft > 0 ? (remaining / daysLeft) : 999;
-    if (hoursPerDayNeeded > 3 || daysLeft < 7) {
-      risks.push({ ...rec, remaining: Math.round(remaining*10)/10, daysLeft, hoursPerDayNeeded: Math.round(hoursPerDayNeeded*10)/10, critical: daysLeft < 5 || hoursPerDayNeeded > 8 });
-    }
-  });
-  return risks;
-}
-
-function renderRiskBanner(sessions) {
-  const risks = computeAtRisk(sessions);
-  const container = document.getElementById('risk-banner-container');
-  if (!container) return;
-  if (risks.length === 0) { container.innerHTML = ''; return; }
-  let html = `<div class="risk-banner"><div class="risk-banner-title">⚠ ${risks.length} student${risks.length>1?'s':''} at risk of not completing hours on time</div>`;
-  risks.forEach(r => {
-    const cls = r.critical ? 'risk-critical' : 'risk-warn';
-    const label = r.critical ? 'Critical' : 'At risk';
-    html += `<div class="risk-card">
-      <div>
-        <div class="risk-name">${r.name}</div>
-        <div class="risk-detail">${r.uni || ''} · ${r.remaining} hrs remaining · ${r.daysLeft} days left · needs ${r.hoursPerDayNeeded} hrs/day</div>
-      </div>
-      <span class="risk-pill ${cls}">${label}</span>
-    </div>`;
-  });
-  html += '</div>';
-  container.innerHTML = html;
-}
-
-// ══════════════════════════════════════════════════════════════
 // FEATURE 2: CAPACITY LIMITS
 // ══════════════════════════════════════════════════════════════
 // The daily limit lives in the Airtable Settings table (same value the
@@ -4317,12 +4249,11 @@ function saveChecklistItem(key, itemId, checked, el) {
 }
 
 // ══════════════════════════════════════════════════════════════
-// PATCH loadSessions TO TRIGGER RISK BANNER + CERT DROPDOWN
+// PATCH loadSessions TO TRIGGER CERT DROPDOWN
 // ══════════════════════════════════════════════════════════════
 const _origLoadSessions = loadSessions;
 loadSessions = async function() {
   await _origLoadSessions.apply(this, arguments);
-  renderRiskBanner(allSessions);
   populateCertStudentSelect();
   renderBlackoutList();
   if (document.getElementById('capacity-limit')) {
