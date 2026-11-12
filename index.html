@@ -4170,7 +4170,7 @@ function renderRotationsBoard() {
         if (st.key === 'active' && end && end < today) flags.push('End date passed');
         if ((st.key === 'hoursdone' || st.key === 'closed') && balance > 0) flags.push('Balance $' + balance.toLocaleString());
         const click = s.id ? `openStudentModalById('${s.id}','${r.id}')` : '';
-        return `<div class="rot-card" draggable="true" data-rot="${r.id}" ondragstart="rotDragStart(event)" ondragend="rotDragEnd(event)" ontouchstart="rotTouchStart(event)" onclick="${click}">
+        return `<div class="rot-card" draggable="${ROT_COARSE ? 'false' : 'true'}" data-rot="${r.id}" ondragstart="rotDragStart(event)" ondragend="rotDragEnd(event)" ontouchstart="rotTouchStart(event)" onclick="${click}">
           <div class="rot-card-name">${escapeHtml(name)}</div>
           ${uni ? `<div class="rot-card-meta">${escapeHtml(uni)}</div>` : ''}
           ${course ? `<div class="rot-card-meta">${escapeHtml(course)}</div>` : ''}
@@ -5453,6 +5453,8 @@ function rotDrop(e) {
 // Touch: press and hold a card ~0.4s to pick it up, slide to a stage, lift
 // to drop. A quick tap still opens the card; a swipe still scrolls.
 let _touch = null;
+// Phones/tablets use the press-and-hold drag below instead of native drag.
+const ROT_COARSE = (() => { try { return matchMedia('(pointer: coarse)').matches; } catch (_) { return false; } })();
 function rotTouchStart(e) {
   if (e.touches.length !== 1) return;
   const card = e.currentTarget, t = e.touches[0];
