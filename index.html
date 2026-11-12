@@ -343,6 +343,9 @@
   .rot-card.dragging { opacity:.4; }
   .rot-col.drop-ok { outline:2px dashed var(--blue); outline-offset:-2px; background:var(--blue-light); }
   .rot-col.drop-no { outline:2px dashed var(--gray-400); outline-offset:-2px; }
+  .rot-card { -webkit-touch-callout:none; }
+  .rot-card.touch-armed { box-shadow:0 0 0 2px var(--blue); }
+  .rot-drag-ghost { position:fixed; z-index:2999; pointer-events:none; width:190px; opacity:.92; transform:rotate(2deg); box-shadow:0 8px 24px rgba(0,0,0,.2); }
   .rot-status-menu { position:fixed; z-index:3000; background:var(--white); border:1px solid var(--gray-100); border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.15); padding:6px; min-width:220px; font-size:13px; }
   .rot-status-menu .head { font-size:11px; color:var(--text-muted); padding:4px 8px 6px; }
   .rot-status-menu button { display:block; width:100%; text-align:left; background:none; border:none; padding:7px 8px; border-radius:6px; cursor:pointer; font-family:inherit; font-size:13px; color:var(--text); }
@@ -4167,7 +4170,7 @@ function renderRotationsBoard() {
         if (st.key === 'active' && end && end < today) flags.push('End date passed');
         if ((st.key === 'hoursdone' || st.key === 'closed') && balance > 0) flags.push('Balance $' + balance.toLocaleString());
         const click = s.id ? `openStudentModalById('${s.id}','${r.id}')` : '';
-        return `<div class="rot-card" draggable="true" data-rot="${r.id}" ondragstart="rotDragStart(event)" ondragend="rotDragEnd(event)" onclick="${click}">
+        return `<div class="rot-card" draggable="true" data-rot="${r.id}" ondragstart="rotDragStart(event)" ondragend="rotDragEnd(event)" ontouchstart="rotTouchStart(event)" onclick="${click}">
           <div class="rot-card-name">${escapeHtml(name)}</div>
           ${uni ? `<div class="rot-card-meta">${escapeHtml(uni)}</div>` : ''}
           ${course ? `<div class="rot-card-meta">${escapeHtml(course)}</div>` : ''}
@@ -5447,6 +5450,84 @@ function rotDrop(e) {
   const name = ((window._studentMap || {})[(r['Student'] || [])[0]] || {})['Student Name'] || 'this rotation';
   showRotStatusMenu(e.clientX, e.clientY, name, stage, r);
 }
+// Touch: press and hold a card ~0.4s to pick it up, slide to a stage, lift
+// to drop. A quick tap still opens the card; a swipe still scrolls.
+let _touch = null;
+function rotTouchStart(e) {
+  if (e.touches.length !== 1) return;
+  const card = e.currentTarget, t = e.touches[0];
+  _touch = { card, id: card.dataset.rot, x0: t.clientX, y0: t.clientY, x: t.clientX, y: t.clientY, active: false, ghost: null, col: null };
+  _touch.timer = setTimeout(() => rotTouchArm(), 400);
+  document.addEventListener('touchmove', rotTouchMove, { passive: false });
+  document.addEventListener('touchend', rotTouchEnd);
+  document.addEventListener('touchcancel', rotTouchCancel);
+}
+function rotTouchArm() {
+  if (!_touch) return;
+  _touch.active = true;
+  _dragRotId = _touch.id;
+  _touch.card.classList.add('dragging');
+  const g = _touch.card.cloneNode(true);
+  g.classList.remove('dragging');
+  g.classList.add('rot-drag-ghost');
+  g.removeAttribute('ontouchstart'); g.removeAttribute('onclick');
+  document.body.appendChild(g);
+  _touch.ghost = g;
+  rotTouchPlace();
+  if (navigator.vibrate) try { navigator.vibrate(15); } catch (_) {}
+}
+function rotTouchPlace() {
+  const g = _touch.ghost;
+  if (g) { g.style.left = (_touch.x - 95) + 'px'; g.style.top = (_touch.y - 20) + 'px'; }
+  const under = document.elementFromPoint(_touch.x, _touch.y);
+  const col = under && under.closest('.rot-col');
+  document.querySelectorAll('.rot-col').forEach(c => c.classList.remove('drop-ok', 'drop-no'));
+  _touch.col = col || null;
+  if (col) col.classList.add(rotDropAllowed(col) ? 'drop-ok' : 'drop-no');
+  // Scroll the board sideways when the finger nears its edge.
+  const board = document.getElementById('rot-board'), b = board.getBoundingClientRect();
+  if (_touch.x > b.right - 40) board.scrollLeft += 12;
+  else if (_touch.x < b.left + 40) board.scrollLeft -= 12;
+}
+function rotTouchMove(e) {
+  if (!_touch) return;
+  const t = e.touches[0];
+  _touch.x = t.clientX; _touch.y = t.clientY;
+  if (!_touch.active) {
+    // Moved before the hold finished → it's a scroll, not a drag.
+    if (Math.hypot(_touch.x - _touch.x0, _touch.y - _touch.y0) > 10) rotTouchCancel();
+    return;
+  }
+  e.preventDefault();
+  rotTouchPlace();
+}
+function rotTouchCleanup() {
+  if (!_touch) return;
+  clearTimeout(_touch.timer);
+  _touch.card.classList.remove('dragging');
+  _touch.ghost?.remove();
+  document.querySelectorAll('.rot-col').forEach(c => c.classList.remove('drop-ok', 'drop-no'));
+  document.removeEventListener('touchmove', rotTouchMove, { passive: false });
+  document.removeEventListener('touchend', rotTouchEnd);
+  document.removeEventListener('touchcancel', rotTouchCancel);
+  _touch = null;
+}
+function rotTouchCancel() { rotTouchCleanup(); _dragRotId = null; }
+function rotTouchEnd(e) {
+  if (!_touch) return;
+  const { active, col, id, x, y } = _touch;
+  if (!active) { rotTouchCleanup(); return; } // plain tap → normal click opens the card
+  e.preventDefault(); // stop the synthetic click from opening the card
+  const ok = col && rotDropAllowed(col);
+  rotTouchCleanup();
+  if (ok) {
+    const stage = ROT_STAGES.find(st => st.key === col.dataset.stage), r = rotationById[id];
+    const name = ((window._studentMap || {})[(r['Student'] || [])[0]] || {})['Student Name'] || 'this rotation';
+    showRotStatusMenu(x, y, name, stage, r);
+  }
+  _dragRotId = null;
+}
+
 function closeRotStatusMenu() { document.getElementById('rot-status-menu')?.remove(); }
 function showRotStatusMenu(x, y, name, stage, r) {
   closeRotStatusMenu();
@@ -5466,9 +5547,16 @@ function showRotStatusMenu(x, y, name, stage, r) {
     closeRotStatusMenu();
     if (!b.dataset.cancel) setRotationStatus(r, stage.statuses[+b.dataset.i]);
   });
-  setTimeout(() => document.addEventListener('mousedown', function off(ev) {
-    if (!m.contains(ev.target)) { closeRotStatusMenu(); document.removeEventListener('mousedown', off); }
-  }), 0);
+  setTimeout(() => {
+    const off = ev => {
+      if (m.contains(ev.target)) return;
+      closeRotStatusMenu();
+      document.removeEventListener('mousedown', off);
+      document.removeEventListener('touchstart', off);
+    };
+    document.addEventListener('mousedown', off);
+    document.addEventListener('touchstart', off);
+  }, 0);
 }
 async function setRotationStatus(r, status) {
   const prev = r['Pipeline Status'] || '';
