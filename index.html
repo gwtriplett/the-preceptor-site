@@ -333,6 +333,18 @@
   .cap-full { background:var(--red-light); color:var(--red); }
   .cap-open { background:var(--green-light); color:var(--green); }
   .cap-near { background:var(--amber-light); color:var(--amber); }
+  .rot-board { display:grid; grid-template-columns:repeat(var(--rot-cols,6), minmax(200px,1fr)); gap:12px; overflow-x:auto; padding-bottom:8px; align-items:start; }
+  .rot-col { background:var(--gray-50); border:1px solid var(--gray-100); border-radius:var(--radius); padding:10px; min-height:120px; }
+  .rot-col-head { display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); margin-bottom:10px; }
+  .rot-col-count { background:var(--white); border:1px solid var(--gray-100); border-radius:10px; padding:0 7px; font-size:11px; }
+  .rot-card { background:var(--white); border:1px solid var(--gray-100); border-radius:8px; padding:9px 10px; margin-bottom:8px; cursor:pointer; font-size:12px; transition:box-shadow .15s; }
+  .rot-card:hover { box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  .rot-card-name { font-weight:600; font-size:13px; color:var(--text); }
+  .rot-card-meta { color:var(--text-muted); margin-top:2px; }
+  .rot-card-status { display:inline-block; margin-top:6px; font-size:10px; padding:1px 6px; border-radius:10px; background:var(--gray-100); color:var(--text-muted); }
+  .rot-progress { height:4px; background:var(--gray-100); border-radius:2px; margin-top:7px; overflow:hidden; }
+  .rot-progress > div { height:100%; background:var(--green); }
+  .rot-flag { color:var(--red); font-weight:600; margin-top:5px; }
   .seats-label { font-size:10px; font-weight:600; padding:1px 6px; border-radius:10px; margin-left:6px; cursor:default; vertical-align:middle; }
   .week-header-cell .seats-label { display:inline-block; margin:4px 0 0; text-transform:none; }
 
@@ -493,6 +505,7 @@
     <button class="mode-tab active" onclick="switchMode('staff')">Staff / Preceptor</button>
     <button class="mode-tab" onclick="switchMode('student')">Student Portal</button>
     <button class="mode-tab" onclick="switchMode('calendar')">Calendar</button>
+    <button class="mode-tab" onclick="switchMode('rotations')">Rotations</button>
     <button class="mode-tab" onclick="switchMode('revenue')">Revenue</button>
     <button class="mode-tab" onclick="switchMode('planning')">Planning</button>
   </div>
@@ -1093,6 +1106,22 @@
 
 </div>
 <!-- ════════════════════════════════ REVENUE PAGE ════════════════════════════════ -->
+<!-- ════════════════════════════════ ROTATIONS PAGE ════════════════════════════════ -->
+<div id="page-rotations" class="page">
+  <div class="section-head" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <div class="section-title" style="font-size:18px">Rotations</div>
+      <div class="section-sub">Every rotation by stage. Click one for details, payments and emails.</div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <input type="search" id="rot-search" placeholder="Search student, school, course…" oninput="renderRotationsBoard()" style="padding:7px 10px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:13px;width:240px" />
+      <label style="font-size:12px;color:var(--text-muted);display:flex;gap:6px;align-items:center"><input type="checkbox" id="rot-show-closed" onchange="renderRotationsBoard()" /> Show withdrawn / terminated</label>
+      <button class="btn btn-sm" onclick="renderRotationsPage()">↻ Refresh</button>
+    </div>
+  </div>
+  <div id="rot-board" class="rot-board"><p style="color:var(--text-muted);font-size:13px">Loading rotations…</p></div>
+</div>
+
 <div id="page-revenue" class="page">
   <div class="section-head" style="margin-bottom:20px">
     <div>
@@ -4031,6 +4060,91 @@ async function createRecurringSessions() {
 }
 
 // ══════════════════════════════════════════════════════════════
+// ROTATIONS PIPELINE
+// ══════════════════════════════════════════════════════════════
+// Stages are derived from the rotation's existing "Pipeline Status" (which
+// also drives Seat Status), so there's no second status to keep in sync.
+// "Hours complete" = Active Rotation whose signed-off + prior hours reach
+// the Hours Goal.
+const ROT_STAGES = [
+  { key: 'requested', label: 'Requested',          statuses: ['NEEDS ATTENTION!!', 'New Application', '🟡 Inquiry Received'] },
+  { key: 'paperwork', label: 'Paperwork pending',  statuses: ['🔵 Contract Sent', '🟠 Awaiting Payment', '3rd Party Preceptor Enrollment'] },
+  { key: 'ready',     label: 'Ready to start',     statuses: ['Enrollment Completed'] },
+  { key: 'active',    label: 'In progress',        statuses: ['🟢 Active Rotation'] },
+  { key: 'hoursdone', label: 'Hours complete',     statuses: [] },
+  { key: 'closed',    label: 'Closed out',         statuses: ['✅ Completed'] },
+  { key: 'dropped',   label: 'Withdrawn / terminated', statuses: ['Withdrawn/Cancelled', '🔴 Terminated'] },
+];
+function rotationHours(r) {
+  const goal = r['Hours Goal'] || 0;
+  const done = (r['Total Hours Signed Off'] || 0) + (r['Prior Hours Completed'] || 0);
+  return { goal, done, pct: goal ? Math.min(100, Math.round(done / goal * 100)) : 0 };
+}
+function rotationStage(r) {
+  const st = r['Pipeline Status'] || '';
+  const stage = ROT_STAGES.find(x => x.statuses.includes(st));
+  if (!stage) return 'requested'; // blank or unknown status → needs a look
+  if (stage.key === 'active') { const h = rotationHours(r); if (h.goal && h.done >= h.goal) return 'hoursdone'; }
+  return stage.key;
+}
+async function renderRotationsPage() {
+  try {
+    if (!studentDirectory.length) await loadStudentDirectory();
+    await loadAllRotations();
+    window._studentMap = {};
+    studentDirectory.forEach(s => { window._studentMap[s.id] = s; });
+    renderRotationsBoard();
+  } catch (e) {
+    console.error(e);
+    document.getElementById('rot-board').innerHTML = '<p style="color:var(--red);font-size:13px">Could not load rotations. Try Refresh.</p>';
+  }
+}
+function renderRotationsBoard() {
+  const board = document.getElementById('rot-board');
+  if (!board) return;
+  const q = (document.getElementById('rot-search').value || '').trim().toLowerCase();
+  const showDropped = document.getElementById('rot-show-closed').checked;
+  const stages = ROT_STAGES.filter(st => st.key !== 'dropped' || showDropped);
+  board.style.setProperty('--rot-cols', stages.length);
+  const today = isoDate(new Date());
+  const cards = {};
+  allRotations.forEach(r => {
+    const s = (window._studentMap || {})[(r['Student'] || [])[0]] || {};
+    const name = s['Student Name'] || '(no student linked)';
+    const uni = s['University / College'] || multiSelectText(r['University (from Student)']) || '';
+    const course = [r['Course Name'], r['Semester / Quarter']].filter(Boolean).join(' · ') || r['Placement Label'] || '';
+    if (q && ![name, uni, course, r['Pipeline Status'] || ''].join(' ').toLowerCase().includes(q)) return;
+    const stage = rotationStage(r);
+    (cards[stage] = cards[stage] || []).push({ r, s, name, uni, course });
+  });
+  board.innerHTML = stages.map(st => {
+    const list = (cards[st.key] || []).sort((a, b) => (a.r['Requested Start Date'] || '9').localeCompare(b.r['Requested Start Date'] || '9'));
+    return `<div class="rot-col">
+      <div class="rot-col-head"><span>${st.label}</span><span class="rot-col-count">${list.length}</span></div>
+      ${list.map(({ r, s, name, uni, course }) => {
+        const h = rotationHours(r);
+        const start = r['Requested Start Date'], end = r['Requested End Date'];
+        const balance = (r['Billed Amount'] || 0) - (r['Amount Paid'] || 0);
+        const flags = [];
+        if (st.key === 'paperwork' && start && start <= today) flags.push('Start date passed, paperwork open');
+        if (st.key === 'active' && end && end < today) flags.push('End date passed');
+        if ((st.key === 'hoursdone' || st.key === 'closed') && balance > 0) flags.push('Balance $' + balance.toLocaleString());
+        const click = s.id ? `openStudentModalById('${s.id}','${r.id}')` : '';
+        return `<div class="rot-card" onclick="${click}">
+          <div class="rot-card-name">${escapeHtml(name)}</div>
+          ${uni ? `<div class="rot-card-meta">${escapeHtml(uni)}</div>` : ''}
+          ${course ? `<div class="rot-card-meta">${escapeHtml(course)}</div>` : ''}
+          ${start ? `<div class="rot-card-meta">${formatDate(start)}${end ? ' – ' + formatDate(end) : ''}</div>` : ''}
+          ${h.goal ? `<div class="rot-progress" title="${h.done} of ${h.goal} hours"><div style="width:${h.pct}%"></div></div><div class="rot-card-meta">${h.done} / ${h.goal} hrs</div>` : ''}
+          ${r['Pipeline Status'] ? `<span class="rot-card-status">${escapeHtml(r['Pipeline Status'])}</span>` : ''}
+          ${flags.map(f => `<div class="rot-flag">⚠ ${f}</div>`).join('')}
+        </div>`;
+      }).join('') || '<div style="font-size:12px;color:var(--gray-400);text-align:center;padding:10px 0">None</div>'}
+    </div>`;
+  }).join('');
+}
+
+// ══════════════════════════════════════════════════════════════
 // FEATURE 5: REVENUE DASHBOARD
 // ══════════════════════════════════════════════════════════════
 // ── PRIOR HOURS OVERRIDE (for students who started before this scheduler) ──
@@ -4366,8 +4480,9 @@ loadSessions = async function() {
 const _origSwitchMode = switchMode;
 switchMode = function(mode) {
   _origSwitchMode.apply(this, arguments);
-  document.querySelector('.main')?.classList.toggle('main-wide', mode === 'revenue');
+  document.querySelector('.main')?.classList.toggle('main-wide', mode === 'revenue' || mode === 'rotations');
   if (mode === 'revenue') renderRevenuePage();
+  if (mode === 'rotations') renderRotationsPage();
   if (mode === 'planning') { renderBlackoutList(); populateCertStudentSelect(); renderPortalAccessList(); document.getElementById('capacity-limit').value = getCapacityLimit(); }
 };
 
