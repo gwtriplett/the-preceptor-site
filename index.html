@@ -4498,10 +4498,10 @@ function renderMonth() {
     const sessions = sessionsOnDate(ds);
     const isToday = ds === todayStr;
     html += `<div class="month-cell${isToday?' today':''}"><div class="cal-day-num">${day}</div>`;
-    sessions.slice(0,5).forEach(s => {
+    sessions.slice(0,9).forEach(s => {
       html += `<div class="cal-event ${statusClass(s['Approval Status'])}${sessionSeatStatus(s) === 'Standby' ? ' standby' : ''}" title="${s['Student Name']} | ${s['Start Time']||''}-${s['End Time']||''} | ${s['Clinical Focus']||''}">${s['Student Name']}</div>`;
     });
-    if (sessions.length > 5) html += `<div class="cal-more">+${sessions.length-5} more</div>`;
+    if (sessions.length > 9) html += `<div class="cal-more">+${sessions.length-9} more</div>`;
     html += '</div>';
   }
 
