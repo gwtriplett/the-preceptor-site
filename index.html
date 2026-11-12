@@ -1209,6 +1209,19 @@
     <div style="margin-top:14px;padding:12px 16px;background:var(--gray-50);border-radius:8px;font-size:12px;color:var(--text-muted)">
       Current setting: <strong id="capacity-display">4 students/day</strong>. Days at capacity will show as unavailable to students and shaded red on the calendar.
     </div>
+    <div style="margin-top:18px;font-size:13px;font-weight:500">Different limit by day of week</div>
+    <p style="font-size:12px;color:var(--text-muted);margin:4px 0 10px">Leave a day blank to use the default above.</p>
+    <div id="capacity-weekdays" style="display:flex;gap:10px;flex-wrap:wrap"></div>
+    <button class="btn btn-primary btn-sm" style="margin-top:10px" onclick="saveWeekdayCapacity()">Save weekday limits</button>
+    <span id="capacity-weekdays-saved" style="font-size:12px;color:var(--green);display:none">✓ Saved</span>
+    <div style="margin-top:18px;font-size:13px;font-weight:500">Specific dates</div>
+    <p style="font-size:12px;color:var(--text-muted);margin:4px 0 10px">A limit for one date. This wins over the weekday and default limits.</p>
+    <div id="capacity-date-list"></div>
+    <div style="margin-top:10px;display:flex;gap:10px;align-items:flex-end;flex-wrap:wrap">
+      <div class="form-group" style="margin:0"><label>Date</label><input type="date" id="capacity-date" /></div>
+      <div class="form-group" style="margin:0"><label>Max students</label><input type="number" id="capacity-date-limit" min="1" max="50" style="width:80px" /></div>
+      <button class="btn btn-primary" onclick="addDateCapacity()">Add date limit</button>
+    </div>
   </div>
 
   <!-- BLACKOUT DATES -->
@@ -2518,7 +2531,7 @@ function renderRequestError(data) {
     });
   }
   if (Array.isArray(data.fullDates) && data.fullDates.length) {
-    lines.push(`<div style="margin-top:${lines.length ? '8px' : '0'}"><strong>Fully booked:</strong> ${data.fullDates.map(d => formatDate(d)).join(', ')} (${data.capacityLimit} students per day). Choose ${data.fullDates.length === 1 ? 'a different date' : 'different dates'} below.</div>`);
+    lines.push(`<div style="margin-top:${lines.length ? '8px' : '0'}"><strong>Fully booked:</strong> ${data.fullDates.map(d => formatDate(d)).join(', ')} ${data.capacityLimit ? '(' + data.capacityLimit + ' students that day)' : '(no seats left)'}. Choose ${data.fullDates.length === 1 ? 'a different date' : 'different dates'} below.</div>`);
     const fullSet = new Set(data.fullDates);
     requestFormDateRows().forEach(r => {
       if (r.date && fullSet.has(r.date)) {
@@ -3748,6 +3761,8 @@ async function loadCapacityLimit() {
     if (typeof renderBlackoutList === 'function') renderBlackoutList();
     const v = rec.fields && rec.fields['Daily Capacity Limit'];
     if (typeof v === 'number' && v > 0) capacityLimit = v;
+    capacityOverrides = parseCapacityOverrides(rec.fields && rec.fields['Capacity Overrides']);
+    renderCapacityOverrides();
     const input = document.getElementById('capacity-limit');
     if (input) input.value = capacityLimit;
     const disp = document.getElementById('capacity-display');
@@ -3757,7 +3772,86 @@ async function loadCapacityLimit() {
     console.error('Could not load capacity limit', e);
   }
 }
-function getCapacityLimit() { return capacityLimit; }
+// Per-day limits live in the Settings "Capacity Overrides" field, one per
+// line: "Tue | 6" (every Tuesday) or "2026-11-20 | 8" (that date). A date
+// wins over its weekday, which wins over the Daily Capacity Limit default.
+// session-request-submit parses the same format.
+const WEEKDAY_NAMES = ['Sun','Mon','Tue','Wed','Thu','Fri','Sat'];
+let capacityOverrides = { weekdays: {}, dates: {} };
+function parseCapacityOverrides(text) {
+  const out = { weekdays: {}, dates: {} };
+  (text || '').split('\n').forEach(line => {
+    const [k, v] = line.split('|').map(x => (x || '').trim());
+    const n = parseInt(v);
+    if (!k || !(n > 0)) return;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(k)) out.dates[k] = n;
+    else {
+      const i = WEEKDAY_NAMES.findIndex(w => w.toLowerCase() === k.slice(0, 3).toLowerCase());
+      if (i >= 0) out.weekdays[i] = n;
+    }
+  });
+  return out;
+}
+function formatCapacityOverrides(o) {
+  const lines = [];
+  for (let i = 0; i < 7; i++) if (o.weekdays[i]) lines.push(`${WEEKDAY_NAMES[i]} | ${o.weekdays[i]}`);
+  Object.keys(o.dates).sort().forEach(d => lines.push(`${d} | ${o.dates[d]}`));
+  return lines.join('\n');
+}
+// With a date, the limit for that day; without one, the default.
+function getCapacityLimit(dateStr) {
+  if (!dateStr) return capacityLimit;
+  if (capacityOverrides.dates[dateStr]) return capacityOverrides.dates[dateStr];
+  const wd = new Date(dateStr + 'T12:00:00').getDay();
+  return capacityOverrides.weekdays[wd] || capacityLimit;
+}
+async function saveCapacityOverrides(o) {
+  if (!settingsRecordId) { alert('Settings not loaded yet — please try again in a moment.'); return false; }
+  const res = await atWrite(STUDENTS_BASE_ID, SETTINGS_TABLE_ID, 'PATCH', `/${settingsRecordId}`, { fields: { 'Capacity Overrides': formatCapacityOverrides(o) } });
+  if (!res) return false;
+  capacityOverrides = o;
+  renderCapacityOverrides();
+  if (typeof renderCalendar === 'function') renderCalendar();
+  return true;
+}
+function renderCapacityOverrides() {
+  const wdEl = document.getElementById('capacity-weekdays');
+  if (wdEl) wdEl.innerHTML = WEEKDAY_NAMES.map((w, i) => `
+    <label style="display:flex;flex-direction:column;align-items:center;font-size:12px;gap:4px">${w}
+      <input type="number" min="1" max="50" id="capacity-wd-${i}" value="${capacityOverrides.weekdays[i] || ''}" placeholder="${capacityLimit}" style="width:56px" />
+    </label>`).join('');
+  const list = document.getElementById('capacity-date-list');
+  if (!list) return;
+  const dates = Object.keys(capacityOverrides.dates).sort();
+  list.innerHTML = dates.length ? dates.map(d => `
+    <div style="display:flex;align-items:center;justify-content:space-between;padding:8px 12px;background:var(--gray-50);border-radius:6px;margin-bottom:6px;font-size:13px">
+      <div><strong>${formatDate(d)}</strong> — ${capacityOverrides.dates[d]} students</div>
+      <button class="btn btn-danger btn-sm" onclick="removeDateCapacity('${d}')">Remove</button>
+    </div>`).join('') : '<p style="font-size:13px;color:var(--text-muted)">No date-specific limits set.</p>';
+}
+async function saveWeekdayCapacity() {
+  const o = { weekdays: {}, dates: { ...capacityOverrides.dates } };
+  for (let i = 0; i < 7; i++) {
+    const v = parseInt(document.getElementById('capacity-wd-' + i).value);
+    if (v > 0) o.weekdays[i] = v;
+  }
+  if (!(await saveCapacityOverrides(o))) return;
+  const el = document.getElementById('capacity-weekdays-saved');
+  el.style.display = 'inline'; setTimeout(() => el.style.display = 'none', 2000);
+}
+async function addDateCapacity() {
+  const d = document.getElementById('capacity-date').value;
+  const n = parseInt(document.getElementById('capacity-date-limit').value);
+  if (!d || !(n > 0)) { alert('Pick a date and enter a number of students.'); return; }
+  const o = { weekdays: { ...capacityOverrides.weekdays }, dates: { ...capacityOverrides.dates, [d]: n } };
+  if (!(await saveCapacityOverrides(o))) return;
+  document.getElementById('capacity-date').value = '';
+  document.getElementById('capacity-date-limit').value = '';
+}
+async function removeDateCapacity(d) {
+  const dates = { ...capacityOverrides.dates }; delete dates[d];
+  await saveCapacityOverrides({ weekdays: { ...capacityOverrides.weekdays }, dates });
+}
 async function saveCapacity() {
   const val = parseInt(document.getElementById('capacity-limit').value);
   if (!val || val < 1) { alert('Enter a valid number.'); return; }
@@ -3765,6 +3859,8 @@ async function saveCapacity() {
   const res = await atWrite(STUDENTS_BASE_ID, SETTINGS_TABLE_ID, 'PATCH', `/${settingsRecordId}`, { fields: { 'Daily Capacity Limit': val } });
   if (!res) return;
   capacityLimit = val;
+  renderCapacityOverrides();
+  if (typeof renderCalendar === 'function') renderCalendar();
   document.getElementById('capacity-display').textContent = val + ' students/day';
   const el = document.getElementById('capacity-saved');
   el.style.display = 'inline'; setTimeout(() => el.style.display = 'none', 2000);
@@ -3787,7 +3883,7 @@ function getStandbyOnDate(dateStr) {
   return activeSessionsOnDate(dateStr).filter(s => sessionSeatStatus(s) === 'Standby').length;
 }
 
-function isAtCapacity(dateStr) { return getSessionsOnDate(dateStr) >= getCapacityLimit(); }
+function isAtCapacity(dateStr) { return getSessionsOnDate(dateStr) >= getCapacityLimit(dateStr); }
 
 // ══════════════════════════════════════════════════════════════
 // FEATURE 3: BLACKOUT DATES
@@ -3899,7 +3995,6 @@ async function createRecurringSessions() {
   const hrs = parseFloat(document.getElementById('recur-hrs').value) || 8;
   const focus = document.getElementById('recur-focus').value;
   if (!confirm(`Create ${dates.length} sessions for ${name}?`)) return;
-  const cap = getCapacityLimit();
   const pickedStudentId = document.getElementById('recur-student-picker')?.value || '';
   // Which of that student's rotations this recurring batch belongs to —
   // populated by populateStaffRotationPicker() once a student is picked
@@ -3909,7 +4004,7 @@ async function createRecurringSessions() {
   const recurRotationId = recurRotationSel && !recurRotationSel.disabled ? recurRotationSel.value : '';
   let blocked = 0;
   const records = dates.filter(ds => {
-    if (getSessionsOnDate(ds) >= cap) { blocked++; return false; }
+    if (isAtCapacity(ds)) { blocked++; return false; }
     return true;
   }).map(ds => ({ fields: {
     'Session Name': `${name} — ${formatDate(ds)}`,
@@ -4283,7 +4378,7 @@ submitRequest = async function() {
   if (date) {
     if (isBlackout(date)) { alert('Sorry — ' + formatDate(date) + ' is a clinic closure date and is not available for scheduling. Please choose a different date.'); return; }
     if (isAtCapacity(date)) {
-      const pw = prompt(`${formatDate(date)} is fully booked (at maximum capacity of ${getCapacityLimit()} students).\n\nStaff can override this and auto-approve the session by entering the staff password:`);
+      const pw = prompt(`${formatDate(date)} is fully booked (at maximum capacity of ${getCapacityLimit(date)} students).\n\nStaff can override this and auto-approve the session by entering the staff password:`);
       if (pw === null) return;
       if (pw !== getStaffPassword()) { alert('Incorrect staff password. Session not added.'); return; }
       const approverName = prompt('Enter your name (Preceptor/Coordinator) to approve this session:');
@@ -4320,7 +4415,7 @@ renderMonth = function() {
     } else {
       const count = getSessionsOnDate(ds);
       const standby = getStandbyOnDate(ds);
-      const cap = getCapacityLimit();
+      const cap = getCapacityLimit(ds);
       if (count > 0) {
         const pct = Math.min(100, Math.round(count/cap*100));
         const cls = count >= cap ? 'capacity-full' : count >= cap-1 ? 'capacity-near' : 'capacity-open';

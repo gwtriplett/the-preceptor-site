@@ -12,12 +12,12 @@ import {
 //   - Sessions: the student's own rows in full; everyone else's reduced to
 //     an anonymous "Booked" time slot (the calendar needs these to show
 //     which days are full)
-//   - Settings: only the capacity limit and blackout dates
+//   - Settings: only the capacity limits and blackout dates
 // Any other table is refused.
 
 const SETTINGS_TABLE_ID = "tblWrhu0Macqnjt3H";
 const MESSAGES_TABLE_ID = "tbltq7GwNZaR4mmUY";
-const SETTINGS_FIELDS = ["Daily Capacity Limit", "Blackout Dates"];
+const SETTINGS_FIELDS = ["Daily Capacity Limit", "Capacity Overrides", "Blackout Dates"];
 const SLOT_FIELDS = ["Session Date", "Start Time", "End Time", "Approval Status", "Hours This Session"];
 
 function json(data: unknown, status = 200) {

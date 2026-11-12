@@ -305,6 +305,25 @@ export default async (req: Request, context: Context) => {
     const configured = setData?.records?.[0]?.fields?.["Daily Capacity Limit"];
     if (setResp.ok && typeof configured === "number" && configured > 0) capacityLimit = configured;
 
+    // Per-day overrides — same Settings row, "Tue | 6" or "2026-11-20 | 8"
+    // per line. A date wins over its weekday, which wins over the default.
+    const WEEKDAYS = ["sun", "mon", "tue", "wed", "thu", "fri", "sat"];
+    const wdLimits: Record<number, number> = {};
+    const dateLimits: Record<string, number> = {};
+    const overrideText: string = (setResp.ok && setData?.records?.[0]?.fields?.["Capacity Overrides"]) || "";
+    overrideText.split("\n").forEach((line) => {
+      const [k, v] = line.split("|").map((x) => (x || "").trim());
+      const n = parseInt(v);
+      if (!k || !(n > 0)) return;
+      if (/^\d{4}-\d{2}-\d{2}$/.test(k)) dateLimits[k] = n;
+      else {
+        const i = WEEKDAYS.indexOf(k.slice(0, 3).toLowerCase());
+        if (i >= 0) wdLimits[i] = n;
+      }
+    });
+    const limitFor = (d: string) =>
+      dateLimits[d] || wdLimits[new Date(d + "T12:00:00Z").getUTCDay()] || capacityLimit;
+
     // Blackout dates — same Settings row, one "YYYY-MM-DD | reason" per line.
     const blackoutText: string = (setResp.ok && setData?.records?.[0]?.fields?.["Blackout Dates"]) || "";
     const blackouts = new Map<string, string>();
@@ -353,14 +372,16 @@ export default async (req: Request, context: Context) => {
     };
 
     const fullDates = capDates.filter((d) =>
-      daySessions.filter((s) => (s.fields?.["Session Date"] || "") === d && isConfirmed(s)).length >= capacityLimit
+      daySessions.filter((s) => (s.fields?.["Session Date"] || "") === d && isConfirmed(s)).length >= limitFor(d)
     );
+    const fullLimits = [...new Set(fullDates.map(limitFor))];
+    const sameLimit = fullLimits.length === 1 ? fullLimits[0] : null;
     if (fullDates.length) {
       return new Response(
         JSON.stringify({
-          error: `${fullDates.map(fmtDate).join(", ")} ${fullDates.length === 1 ? "is" : "are"} fully booked (${capacityLimit} students per day). Please choose ${fullDates.length === 1 ? "a different date" : "different dates"}.`,
+          error: `${fullDates.map(fmtDate).join(", ")} ${fullDates.length === 1 ? "is" : "are"} fully booked${sameLimit ? ` (${sameLimit} students that day)` : ""}. Please choose ${fullDates.length === 1 ? "a different date" : "different dates"}.`,
           fullDates,
-          capacityLimit,
+          capacityLimit: sameLimit,
         }),
         { status: 409 }
       );
