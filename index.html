@@ -5420,14 +5420,27 @@ function buildAttentionItems() {
       const miss = checklistStatus(r).missingBeforeStart;
       if (miss.length) add('Starting soon', `Starts ${formatDate(start)} (${daysBetween(today, start)} days) — missing: ${miss.join(', ')}`, start);
     }
-    // Short on hours: signed-off + prior + upcoming booked sessions (Pending/
-    // Approved, from today on) still won't reach the Hours Goal.
+    // Short on hours: prior hours + every Pending/Approved/Completed session
+    // for this rotation still won't reach the Hours Goal. Older sessions
+    // aren't linked to a rotation, so those count when they belong to the
+    // same student and fall inside the rotation's dates.
     if (['ready', 'active'].includes(stage) && end && end >= today) {
-      const h = rotationHours(r);
-      const booked = allSessions.filter(x => (x['Rotation'] || []).includes(r.id) && (x['Session Date'] || '') >= today
-        && ['Pending', 'Approved'].includes(x['Approval Status'])).reduce((t, x) => t + (x['Hours This Session'] || 0), 0);
-      const planned = Math.round((h.done + booked) * 10) / 10;
-      if (h.goal && planned < h.goal) add('Short on hours', `${h.done} done + ${Math.round(booked * 10) / 10} booked = ${planned} of ${h.goal} hrs — ${Math.round((h.goal - planned) * 10) / 10} more needed by ${formatDate(end)}`, end);
+      const goal = r['Hours Goal'] || 0;
+      const sid = s.id, emails = splitEmailsClient(s['Email']);
+      const mine = allSessions.filter(x => {
+        if (!['Pending', 'Approved', 'Completed'].includes(x['Approval Status'])) return false;
+        const linked = x['Rotation'] || [];
+        if (linked.length) return linked.includes(r.id);
+        const d = x['Session Date'] || '';
+        const sameStudent = (sid && x['Student ID (Airtable)'] === sid) || emails.includes((x['Student Email'] || '').toLowerCase());
+        return sameStudent && start && d >= start && d <= end;
+      });
+      const doneOrPast = mine.filter(x => x['Approval Status'] === 'Completed' || (x['Session Date'] || '') < today).reduce((t, x) => t + (x['Hours This Session'] || 0), 0);
+      const upcoming = mine.filter(x => x['Approval Status'] !== 'Completed' && (x['Session Date'] || '') >= today).reduce((t, x) => t + (x['Hours This Session'] || 0), 0);
+      const prior = r['Prior Hours Completed'] || 0;
+      const rd = n => Math.round(n * 10) / 10;
+      const planned = rd(prior + doneOrPast + upcoming);
+      if (goal && planned < goal) add('Short on hours', `${rd(prior + doneOrPast)} done + ${rd(upcoming)} booked = ${planned} of ${goal} hrs — ${rd(goal - planned)} more needed by ${formatDate(end)}`, end);
     }
     // Ended but not closed out
     if (['active', 'hoursdone', 'ready'].includes(stage) && end && end < today) {
