@@ -339,6 +339,14 @@
   .rot-col-count { background:var(--white); border:1px solid var(--gray-100); border-radius:10px; padding:0 7px; font-size:11px; }
   .rot-card { background:var(--white); border:1px solid var(--gray-100); border-radius:8px; padding:9px 10px; margin-bottom:8px; cursor:pointer; font-size:12px; transition:box-shadow .15s; }
   .rot-card:hover { box-shadow:0 2px 8px rgba(0,0,0,.08); }
+  .rot-card[draggable="true"] { cursor:grab; }
+  .rot-card.dragging { opacity:.4; }
+  .rot-col.drop-ok { outline:2px dashed var(--blue); outline-offset:-2px; background:var(--blue-light); }
+  .rot-col.drop-no { outline:2px dashed var(--gray-400); outline-offset:-2px; }
+  .rot-status-menu { position:fixed; z-index:3000; background:var(--white); border:1px solid var(--gray-100); border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.15); padding:6px; min-width:220px; font-size:13px; }
+  .rot-status-menu .head { font-size:11px; color:var(--text-muted); padding:4px 8px 6px; }
+  .rot-status-menu button { display:block; width:100%; text-align:left; background:none; border:none; padding:7px 8px; border-radius:6px; cursor:pointer; font-family:inherit; font-size:13px; color:var(--text); }
+  .rot-status-menu button:hover { background:var(--gray-50); }
   .rot-card-name { font-weight:600; font-size:13px; color:var(--text); }
   .rot-card-meta { color:var(--text-muted); margin-top:2px; }
   .rot-card-status { display:inline-block; margin-top:6px; font-size:10px; padding:1px 6px; border-radius:10px; background:var(--gray-100); color:var(--text-muted); }
@@ -4148,7 +4156,7 @@ function renderRotationsBoard() {
   });
   board.innerHTML = stages.map(st => {
     const list = (cards[st.key] || []).sort((a, b) => (a.r['Requested Start Date'] || '9').localeCompare(b.r['Requested Start Date'] || '9'));
-    return `<div class="rot-col">
+    return `<div class="rot-col" data-stage="${st.key}" ondragover="rotDragOver(event)" ondragleave="rotDragLeave(event)" ondrop="rotDrop(event)">
       <div class="rot-col-head"><span>${st.label}</span><span class="rot-col-count">${list.length}</span></div>
       ${list.map(({ r, s, name, uni, course }) => {
         const h = rotationHours(r);
@@ -4159,7 +4167,7 @@ function renderRotationsBoard() {
         if (st.key === 'active' && end && end < today) flags.push('End date passed');
         if ((st.key === 'hoursdone' || st.key === 'closed') && balance > 0) flags.push('Balance $' + balance.toLocaleString());
         const click = s.id ? `openStudentModalById('${s.id}','${r.id}')` : '';
-        return `<div class="rot-card" onclick="${click}">
+        return `<div class="rot-card" draggable="true" data-rot="${r.id}" ondragstart="rotDragStart(event)" ondragend="rotDragEnd(event)" onclick="${click}">
           <div class="rot-card-name">${escapeHtml(name)}</div>
           ${uni ? `<div class="rot-card-meta">${escapeHtml(uni)}</div>` : ''}
           ${course ? `<div class="rot-card-meta">${escapeHtml(course)}</div>` : ''}
@@ -5397,6 +5405,93 @@ async function toggleChecklistItem(label, box) {
   if (rotationById[r.id] && rotationById[r.id] !== r) rotationById[r.id]['Checklist'] = next;
   logRotationActivity('Note', `${box.checked ? 'Checked' : 'Unchecked'}: ${label}`);
   if (document.getElementById('page-rotations')?.classList.contains('active')) renderRotationsBoard();
+}
+
+// ── DRAG AND DROP BETWEEN STAGES ──
+// Dropping a card sets the rotation's Pipeline Status. Stages that cover
+// several statuses ask which one. "Hours complete" can't be a drop target:
+// it follows from hours reaching the goal while the rotation is Active.
+let _dragRotId = null;
+function rotDragStart(e) {
+  _dragRotId = e.currentTarget.dataset.rot;
+  e.dataTransfer.effectAllowed = 'move';
+  try { e.dataTransfer.setData('text/plain', _dragRotId); } catch (_) {}
+  e.currentTarget.classList.add('dragging');
+}
+function rotDragEnd(e) {
+  e.currentTarget.classList.remove('dragging');
+  document.querySelectorAll('.rot-col').forEach(c => c.classList.remove('drop-ok', 'drop-no'));
+  _dragRotId = null;
+}
+function rotDropAllowed(col) {
+  const r = rotationById[_dragRotId];
+  return r && col.dataset.stage !== 'hoursdone' && col.dataset.stage !== rotationStage(r);
+}
+function rotDragOver(e) {
+  if (!_dragRotId) return;
+  const col = e.currentTarget, ok = rotDropAllowed(col);
+  col.classList.toggle('drop-ok', ok);
+  col.classList.toggle('drop-no', !ok);
+  if (ok) { e.preventDefault(); e.dataTransfer.dropEffect = 'move'; }
+}
+function rotDragLeave(e) {
+  if (!e.currentTarget.contains(e.relatedTarget)) e.currentTarget.classList.remove('drop-ok', 'drop-no');
+}
+function rotDrop(e) {
+  e.preventDefault();
+  const col = e.currentTarget, stageKey = col.dataset.stage, id = _dragRotId;
+  col.classList.remove('drop-ok', 'drop-no');
+  if (!id || !rotDropAllowed(col)) return;
+  const stage = ROT_STAGES.find(x => x.key === stageKey);
+  const r = rotationById[id];
+  const name = ((window._studentMap || {})[(r['Student'] || [])[0]] || {})['Student Name'] || 'this rotation';
+  showRotStatusMenu(e.clientX, e.clientY, name, stage, r);
+}
+function closeRotStatusMenu() { document.getElementById('rot-status-menu')?.remove(); }
+function showRotStatusMenu(x, y, name, stage, r) {
+  closeRotStatusMenu();
+  const m = document.createElement('div');
+  m.id = 'rot-status-menu';
+  m.className = 'rot-status-menu';
+  m.innerHTML = `<div class="head">Move <strong>${escapeHtml(name)}</strong> to ${escapeHtml(stage.label)} — set status to:</div>` +
+    stage.statuses.map((st, i) => `<button data-i="${i}">${escapeHtml(st)}</button>`).join('') +
+    `<button data-cancel="1" style="color:var(--text-muted)">Cancel</button>`;
+  document.body.appendChild(m);
+  const w = m.offsetWidth, h = m.offsetHeight;
+  m.style.left = Math.max(8, Math.min(x, innerWidth - w - 8)) + 'px';
+  m.style.top = Math.max(8, Math.min(y, innerHeight - h - 8)) + 'px';
+  m.addEventListener('click', ev => {
+    const b = ev.target.closest('button');
+    if (!b) return;
+    closeRotStatusMenu();
+    if (!b.dataset.cancel) setRotationStatus(r, stage.statuses[+b.dataset.i]);
+  });
+  setTimeout(() => document.addEventListener('mousedown', function off(ev) {
+    if (!m.contains(ev.target)) { closeRotStatusMenu(); document.removeEventListener('mousedown', off); }
+  }), 0);
+}
+async function setRotationStatus(r, status) {
+  const prev = r['Pipeline Status'] || '';
+  r['Pipeline Status'] = status;          // move the card right away
+  renderRotationsBoard();
+  const res = await atWrite(STUDENTS_BASE_ID, ROTATIONS_TABLE_ID, 'PATCH', `/${r.id}`, { fields: { 'Pipeline Status': status } });
+  if (!res) {
+    r['Pipeline Status'] = prev;
+    renderRotationsBoard();
+    showEmailToast('Could not change the status — the card was moved back.', 'warn');
+    return;
+  }
+  // Seat Status is an Airtable formula off Pipeline Status; refresh it so
+  // capacity counts on the calendar stay right.
+  try {
+    const fresh = await atRead(STUDENTS_BASE_ID, ROTATIONS_TABLE_ID, `/${r.id}`);
+    if (fresh && fresh.fields) r['Seat Status'] = fresh.fields['Seat Status'];
+  } catch (_) {}
+  const prevRot = _currentRotation;
+  _currentRotation = r;
+  await logRotationActivity('Note', `Status: ${prev || '(none)'} → ${status}`);
+  _currentRotation = prevRot;
+  showEmailToast(`✓ Moved to ${status}`, 'ok');
 }
 
 // ── NEEDS ATTENTION ──
