@@ -37,7 +37,9 @@ function scope(table: string, rec: any, id: StudentIdentity): any | null {
     case STUDENTS_TABLE_ID:
       return id.studentIds.has(rec.id) ? rec : null;
     case ROTATIONS_TABLE_ID:
-      return ownsRotation(id, rec.id, f) ? rec : null;
+      // Activity Log is staff-only (emails sent, internal notes).
+      if (!ownsRotation(id, rec.id, f)) return null;
+      { const { ["Activity Log"]: _staffOnly, ...visible } = f; return { ...rec, fields: visible }; }
     case MESSAGES_TABLE_ID:
       return splitEmails(f["Student Email"]).some((e) => id.emails.has(e)) ? rec : null;
     case SESSIONS_TABLE_ID:

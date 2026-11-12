@@ -1193,7 +1193,18 @@
       <div id="sdm-email-buttons" style="display:flex;flex-direction:column;gap:10px;"></div>
 
       <div style="margin-top:12px;font-size:11px;color:var(--text-muted);font-style:italic;">
-        Clicking any button opens a pre-filled Gmail compose window. Review before sending.
+        Clicking any button opens a pre-filled Gmail compose window. Review before sending. Each one is recorded in the activity log below.
+      </div>
+
+      <!-- Activity log for the selected rotation -->
+      <div style="margin-top:18px;border-top:1px solid var(--gray-100);padding-top:14px">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:8px">Activity log — this rotation</div>
+        <div style="display:flex;gap:8px;margin-bottom:10px">
+          <input id="sdm-note" type="text" placeholder="Add a note (call, text, document received…)" onkeydown="if(event.key==='Enter')addRotationNote()"
+            style="flex:1;padding:6px 9px;border:1px solid var(--gray-100);border-radius:6px;font-size:12px;font-family:inherit" />
+          <button class="btn btn-primary btn-sm" onclick="addRotationNote()">Add note</button>
+        </div>
+        <div id="sdm-activity"></div>
       </div>
     </div>
   </div>
@@ -4876,6 +4887,7 @@ function openStudentModal(event, student, rotationId) {
 
   // Email buttons
   renderSdmEmailButtons(view);
+  renderRotationActivity();
 
   // Rotations — each gets a Download PDF link for its session list.
   loadSdmRotations(student);
@@ -5319,6 +5331,50 @@ function sendSdmEmail(group, idx) {
     '&su=' + encodeURIComponent(email.subject) +
     '&body=' + encodeURIComponent(email.body);
   window.open(url, '_blank');
+  logRotationActivity('Email', `${email.label.replace(/^\S+\s+/, '')} → ${email.toEmail || '(no address)'}`);
+}
+
+// ── ROTATION ACTIVITY LOG ──
+// Rotations "Activity Log" field, newest first, one entry per line:
+// "YYYY-MM-DD HH:MM | Email|Note | text". Staff-only (student-read strips it).
+function parseActivityLog(text) {
+  return (text || '').split('\n').map(line => {
+    const [when, type, ...rest] = line.split(' | ');
+    return { when: (when || '').trim(), type: (type || '').trim(), text: rest.join(' | ').trim() };
+  }).filter(e => e.when && e.text);
+}
+function renderRotationActivity() {
+  const el = document.getElementById('sdm-activity');
+  if (!el) return;
+  const r = _currentRotation;
+  if (!r) { el.innerHTML = '<p style="font-size:12px;color:var(--text-muted)">No rotation selected.</p>'; return; }
+  const items = parseActivityLog(r['Activity Log']);
+  el.innerHTML = items.length ? items.map(e => `
+    <div style="display:flex;gap:10px;padding:6px 0;border-bottom:1px solid var(--gray-50);font-size:12px">
+      <div style="white-space:nowrap;color:var(--text-muted);min-width:118px">${escapeHtml(e.when)}</div>
+      <div style="white-space:nowrap;font-weight:600;color:${e.type === 'Email' ? 'var(--blue)' : 'var(--text)'};min-width:44px">${e.type === 'Email' ? '📧 Email' : '📝 Note'}</div>
+      <div style="color:var(--text)">${escapeHtml(e.text)}</div>
+    </div>`).join('') : '<p style="font-size:12px;color:var(--text-muted)">Nothing logged yet.</p>';
+}
+async function logRotationActivity(type, text) {
+  const r = _currentRotation;
+  if (!r) { showEmailToast('No rotation selected — this was not logged.', 'warn'); return false; }
+  const d = new Date();
+  const when = isoDate(d) + ' ' + String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0');
+  const line = `${when} | ${type} | ${String(text).replace(/[\r\n]+/g, ' ').trim()}`;
+  const next = r['Activity Log'] ? line + '\n' + r['Activity Log'] : line;
+  const res = await atWrite(STUDENTS_BASE_ID, ROTATIONS_TABLE_ID, 'PATCH', `/${r.id}`, { fields: { 'Activity Log': next } });
+  if (!res) { showEmailToast('Could not save to the activity log.', 'warn'); return false; }
+  r['Activity Log'] = next;
+  if (rotationById[r.id] && rotationById[r.id] !== r) rotationById[r.id]['Activity Log'] = next;
+  renderRotationActivity();
+  return true;
+}
+async function addRotationNote() {
+  const input = document.getElementById('sdm-note');
+  const text = (input.value || '').trim();
+  if (!text) return;
+  if (await logRotationActivity('Note', text)) input.value = '';
 }
 
 // ══════════════════════════════════════════════════════════════
