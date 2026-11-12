@@ -1119,6 +1119,7 @@
       <button class="btn btn-sm" onclick="renderRotationsPage()">↻ Refresh</button>
     </div>
   </div>
+  <div id="rot-attention" style="margin-bottom:16px"></div>
   <div id="rot-board" class="rot-board"><p style="color:var(--text-muted);font-size:13px">Loading rotations…</p></div>
 </div>
 
@@ -1194,6 +1195,12 @@
 
       <div style="margin-top:12px;font-size:11px;color:var(--text-muted);font-style:italic;">
         Clicking any button opens a pre-filled Gmail compose window. Review before sending. Each one is recorded in the activity log below.
+      </div>
+
+      <!-- Checklist for the selected rotation -->
+      <div style="margin-top:18px;border-top:1px solid var(--gray-100);padding-top:14px">
+        <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:8px">Checklist — this rotation</div>
+        <div id="sdm-checklist" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 14px"></div>
       </div>
 
       <!-- Activity log for the selected rotation -->
@@ -4104,6 +4111,7 @@ async function renderRotationsPage() {
     await loadAllRotations();
     window._studentMap = {};
     studentDirectory.forEach(s => { window._studentMap[s.id] = s; });
+    try { await loadUnresolvedMessages(); } catch (e) { console.error('Could not load messages', e); }
     renderRotationsBoard();
   } catch (e) {
     console.error(e);
@@ -4117,6 +4125,7 @@ function renderRotationsBoard() {
   const showDropped = document.getElementById('rot-show-closed').checked;
   const stages = ROT_STAGES.filter(st => st.key !== 'dropped' || showDropped);
   board.style.setProperty('--rot-cols', stages.length);
+  renderAttention();
   const today = isoDate(new Date());
   const cards = {};
   allRotations.forEach(r => {
@@ -4148,6 +4157,7 @@ function renderRotationsBoard() {
           ${start ? `<div class="rot-card-meta">${formatDate(start)}${end ? ' – ' + formatDate(end) : ''}</div>` : ''}
           ${h.goal ? `<div class="rot-progress" title="${h.done} of ${h.goal} hours"><div style="width:${h.pct}%"></div></div><div class="rot-card-meta">${h.done} / ${h.goal} hrs</div>` : ''}
           ${r['Pipeline Status'] ? `<span class="rot-card-status">${escapeHtml(r['Pipeline Status'])}</span>` : ''}
+          ${(() => { const c = checklistStatus(r); return `<span class="rot-card-status" title="Checklist" style="margin-left:4px;${c.done === c.total ? 'background:var(--green-light);color:var(--green)' : ''}">☑ ${c.done}/${c.total}</span>`; })()}
           ${flags.map(f => `<div class="rot-flag">⚠ ${f}</div>`).join('')}
         </div>`;
       }).join('') || '<div style="font-size:12px;color:var(--gray-400);text-align:center;padding:10px 0">None</div>'}
@@ -4887,6 +4897,7 @@ function openStudentModal(event, student, rotationId) {
 
   // Email buttons
   renderSdmEmailButtons(view);
+  renderRotationChecklist();
   renderRotationActivity();
 
   // Rotations — each gets a Download PDF link for its session list.
@@ -5332,6 +5343,141 @@ function sendSdmEmail(group, idx) {
     '&body=' + encodeURIComponent(email.body);
   window.open(url, '_blank');
   logRotationActivity('Email', `${email.label.replace(/^\S+\s+/, '')} → ${email.toEmail || '(no address)'}`);
+}
+
+// ── ROTATION CHECKLIST ──
+// First three tick themselves from dates already on the rotation; the rest
+// are ticked by hand and stored in the Rotations "Checklist" multi-select.
+const CHECKLIST_AUTO = [
+  { label: 'Contract sent',     test: r => !!r['Contract Sent Date'] },
+  { label: 'Contract signed',   test: r => !!r['Contract Signed Date'] },
+  { label: 'Payment received',  test: r => !!r['Payment Received Date'] || r['Payment Status'] === 'Paid' },
+];
+const CHECKLIST_MANUAL = ['Onboarding docs received', 'Background check cleared', 'Orientation done', 'Final paperwork sent'];
+function checklistTicked(r) { return (r['Checklist'] || []).map(x => typeof x === 'object' ? x.name : x); }
+function checklistStatus(r) {
+  const ticked = checklistTicked(r);
+  const items = CHECKLIST_AUTO.map(c => ({ label: c.label, done: c.test(r), auto: true }))
+    .concat(CHECKLIST_MANUAL.map(l => ({ label: l, done: ticked.includes(l), auto: false })));
+  // "Final paperwork" belongs at the end of a rotation, so it doesn't count as missing before start.
+  const prestart = items.filter(i => i.label !== 'Final paperwork sent');
+  return { items, done: items.filter(i => i.done).length, total: items.length, missingBeforeStart: prestart.filter(i => !i.done).map(i => i.label) };
+}
+function renderRotationChecklist() {
+  const el = document.getElementById('sdm-checklist');
+  if (!el) return;
+  const r = _currentRotation;
+  if (!r) { el.innerHTML = '<p style="font-size:12px;color:var(--text-muted)">No rotation selected.</p>'; return; }
+  el.innerHTML = checklistStatus(r).items.map(i => `
+    <label style="display:flex;gap:8px;align-items:center;font-size:13px;${i.auto ? 'color:var(--text-muted)' : 'cursor:pointer'}" title="${i.auto ? 'Ticks automatically from the date on this rotation' : ''}">
+      <input type="checkbox" ${i.done ? 'checked' : ''} ${i.auto ? 'disabled' : `onchange="toggleChecklistItem('${i.label}', this)"`} />
+      ${i.label}${i.auto ? ' <span style="font-size:10px">(auto)</span>' : ''}
+    </label>`).join('');
+}
+async function toggleChecklistItem(label, box) {
+  const r = _currentRotation;
+  if (!r) return;
+  const ticked = new Set(checklistTicked(r));
+  box.checked ? ticked.add(label) : ticked.delete(label);
+  const next = CHECKLIST_MANUAL.filter(l => ticked.has(l));
+  box.disabled = true;
+  const res = await atWrite(STUDENTS_BASE_ID, ROTATIONS_TABLE_ID, 'PATCH', `/${r.id}`, { fields: { 'Checklist': next } });
+  box.disabled = false;
+  if (!res) { box.checked = !box.checked; showEmailToast('Could not save the checklist.', 'warn'); return; }
+  r['Checklist'] = next;
+  if (rotationById[r.id] && rotationById[r.id] !== r) rotationById[r.id]['Checklist'] = next;
+  logRotationActivity('Note', `${box.checked ? 'Checked' : 'Unchecked'}: ${label}`);
+  if (document.getElementById('page-rotations')?.classList.contains('active')) renderRotationsBoard();
+}
+
+// ── NEEDS ATTENTION ──
+let unresolvedMessages = [];
+async function loadUnresolvedMessages() {
+  let all = [], offset = '';
+  do {
+    const f = encodeURIComponent(`{Status}!="Resolved"`);
+    const data = await atRead(STUDENTS_BASE_ID, COORD_MESSAGES_TABLE_ID, `?filterByFormula=${f}&pageSize=100${offset ? '&offset=' + offset : ''}`);
+    if (!data) throw new Error('messages');
+    all = all.concat((data.records || []).map(r => ({ id: r.id, createdTime: r.createdTime, ...r.fields })));
+    offset = data.offset || '';
+  } while (offset);
+  unresolvedMessages = all;
+}
+function daysBetween(a, b) { return Math.round((new Date(b + 'T12:00:00') - new Date(a + 'T12:00:00')) / 86400000); }
+function buildAttentionItems() {
+  const today = isoDate(new Date());
+  const items = [];
+  const studentOf = r => (window._studentMap || {})[(r['Student'] || [])[0]] || {};
+  allRotations.forEach(r => {
+    const stage = rotationStage(r);
+    if (stage === 'dropped') return;
+    const s = studentOf(r), name = s['Student Name'] || '(no student)';
+    const start = r['Requested Start Date'], end = r['Requested End Date'];
+    const open = s.id ? `openStudentModalById('${s.id}','${r.id}')` : '';
+    const add = (kind, text, sort) => items.push({ kind, name, text, open, sort });
+    // Starting within 14 days with checklist items missing
+    if (['requested', 'paperwork', 'ready'].includes(stage) && start && start >= today && daysBetween(today, start) <= 14) {
+      const miss = checklistStatus(r).missingBeforeStart;
+      if (miss.length) add('Starting soon', `Starts ${formatDate(start)} (${daysBetween(today, start)} days) — missing: ${miss.join(', ')}`, start);
+    }
+    // Behind on hours pace (in progress, at least a week in)
+    if (stage === 'active' && start && end && start < today && end > today) {
+      const h = rotationHours(r), span = daysBetween(start, end), gone = daysBetween(start, today);
+      if (h.goal && span > 0 && gone >= 7) {
+        const expected = Math.round(h.goal * gone / span);
+        if (h.done < expected * 0.8) add('Behind on hours', `${h.done} of ${h.goal} hrs — about ${expected} expected by now (ends ${formatDate(end)})`, end);
+      }
+    }
+    // Ended but not closed out
+    if (['active', 'hoursdone', 'ready'].includes(stage) && end && end < today) {
+      add('Not closed out', `Ended ${formatDate(end)} — still "${r['Pipeline Status'] || 'no status'}"`, end);
+    }
+    // Unpaid balance once the rotation has started, or past the due date
+    const balance = (r['Billed Amount'] || 0) - (r['Amount Paid'] || 0);
+    const due = r['Payment Due Date'];
+    if (balance > 0 && ((due && due < today) || (start && start <= today))) {
+      add('Unpaid balance', `$${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })} owed${due ? ' — due ' + formatDate(due) : ''}`, due || start);
+    }
+  });
+  // Unanswered student messages
+  unresolvedMessages.forEach(m => {
+    const email = (m['Student Email'] || '').toLowerCase();
+    const s = studentDirectory.find(x => splitEmailsClient(x['Email']).includes(email)) || {};
+    const r = s.id ? (rotationsFor(s)[0] || null) : null;
+    const when = (m['Submitted'] || m.createdTime || '').slice(0, 10);
+    items.push({ kind: 'Unanswered message', name: s['Student Name'] || m['Student Email'] || 'Unknown student',
+      text: `${m['Status'] || 'New'} since ${when ? formatDate(when) : '—'}${m['Subject'] ? ' — ' + m['Subject'] : ''}`,
+      open: s.id ? `openStudentModalById('${s.id}'${r ? `,'${r.id}'` : ''})` : '', sort: when });
+  });
+  return items;
+}
+function splitEmailsClient(v) { return String(v || '').toLowerCase().split(/[\s,;]+/).filter(Boolean); }
+const ATTENTION_KINDS = [
+  ['Starting soon', 'var(--amber)'], ['Behind on hours', 'var(--amber)'], ['Not closed out', 'var(--blue)'],
+  ['Unpaid balance', 'var(--red)'], ['Unanswered message', 'var(--blue)'],
+];
+function renderAttention() {
+  const el = document.getElementById('rot-attention');
+  if (!el) return;
+  const items = buildAttentionItems();
+  if (!items.length) { el.innerHTML = '<div class="card" style="font-size:13px;color:var(--green)">✓ Nothing needs attention right now.</div>'; return; }
+  const open = (() => { try { return localStorage.getItem('rot_attention_open') !== 'false'; } catch { return true; } })();
+  el.innerHTML = `<details class="card" ${open ? 'open' : ''} ontoggle="try{localStorage.setItem('rot_attention_open', this.open)}catch(e){}" style="padding:12px 16px">
+    <summary style="cursor:pointer;font-weight:700;font-size:14px">⚠ Needs attention <span class="rot-col-count">${items.length}</span></summary>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(300px,1fr));gap:12px;margin-top:12px">
+      ${ATTENTION_KINDS.map(([kind, color]) => {
+        const list = items.filter(i => i.kind === kind).sort((a, b) => (a.sort || '').localeCompare(b.sort || ''));
+        if (!list.length) return '';
+        return `<div>
+          <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${color};margin-bottom:6px">${kind} (${list.length})</div>
+          ${list.map(i => `<div class="rot-card" style="margin-bottom:6px" ${i.open ? `onclick="${i.open}"` : ''}>
+            <div class="rot-card-name">${escapeHtml(i.name)}</div>
+            <div class="rot-card-meta">${escapeHtml(i.text)}</div>
+          </div>`).join('')}
+        </div>`;
+      }).join('')}
+    </div>
+  </details>`;
 }
 
 // ── ROTATION ACTIVITY LOG ──
