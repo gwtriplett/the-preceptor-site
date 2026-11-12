@@ -344,6 +344,11 @@
   .rot-col.drop-ok { outline:2px dashed var(--blue); outline-offset:-2px; background:var(--blue-light); }
   .rot-col.drop-no { outline:2px dashed var(--gray-400); outline-offset:-2px; }
   .rot-card { -webkit-touch-callout:none; }
+  .msg-badge { display:inline-block; min-width:16px; padding:0 5px; margin-left:4px; border-radius:9px; background:var(--red); color:#fff; font-size:10px; font-weight:700; line-height:16px; text-align:center; }
+  .msg-item { background:var(--white); border:1px solid var(--gray-100); border-radius:var(--radius); padding:14px 16px; margin-bottom:10px; }
+  .msg-item.is-new { border-left:4px solid var(--amber); }
+  .msg-item.is-progress { border-left:4px solid var(--blue); }
+  .msg-item.is-resolved { opacity:.75; }
   .rot-card.touch-armed { box-shadow:0 0 0 2px var(--blue); }
   .rot-drag-ghost { position:fixed; z-index:2999; pointer-events:none; width:190px; opacity:.92; transform:rotate(2deg); box-shadow:0 8px 24px rgba(0,0,0,.2); }
   .rot-status-menu { position:fixed; z-index:3000; background:var(--white); border:1px solid var(--gray-100); border-radius:8px; box-shadow:0 6px 24px rgba(0,0,0,.15); padding:6px; min-width:220px; font-size:13px; }
@@ -517,6 +522,7 @@
     <button class="mode-tab" onclick="switchMode('student')">Student Portal</button>
     <button class="mode-tab" onclick="switchMode('calendar')">Calendar</button>
     <button class="mode-tab" onclick="switchMode('rotations')">Rotations</button>
+    <button class="mode-tab" onclick="switchMode('messages')">Messages <span id="msg-tab-badge" class="msg-badge" style="display:none"></span></button>
     <button class="mode-tab" onclick="switchMode('revenue')">Revenue</button>
     <button class="mode-tab" onclick="switchMode('planning')">Planning</button>
   </div>
@@ -1132,6 +1138,28 @@
   </div>
   <div id="rot-attention" style="margin-bottom:16px"></div>
   <div id="rot-board" class="rot-board"><p style="color:var(--text-muted);font-size:13px">Loading rotations…</p></div>
+</div>
+
+<!-- ════════════════════════════════ MESSAGES PAGE ════════════════════════════════ -->
+<div id="page-messages" class="page">
+  <div class="section-head" style="margin-bottom:14px;flex-wrap:wrap;gap:10px">
+    <div>
+      <div class="section-title" style="font-size:18px">Student messages</div>
+      <div class="section-sub">Messages sent from the student portal. Your reply shows in the student's portal under "Coordinator notes".</div>
+    </div>
+    <div style="display:flex;gap:10px;align-items:center;flex-wrap:wrap">
+      <select id="msg-filter" onchange="renderMessagesList()" style="padding:7px 10px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:13px">
+        <option value="open">Open (New + In Progress)</option>
+        <option value="New">New</option>
+        <option value="In Progress">In Progress</option>
+        <option value="Resolved">Resolved</option>
+        <option value="all">All</option>
+      </select>
+      <input type="search" id="msg-search" placeholder="Search student or text…" oninput="renderMessagesList()" style="padding:7px 10px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:13px;width:220px" />
+      <button class="btn btn-sm" onclick="renderMessagesPage()">↻ Refresh</button>
+    </div>
+  </div>
+  <div id="msg-list"><p style="color:var(--text-muted);font-size:13px">Loading messages…</p></div>
 </div>
 
 <div id="page-revenue" class="page">
@@ -4505,6 +4533,11 @@ function saveChecklistItem(key, itemId, checked, el) {
 const _origLoadSessions = loadSessions;
 loadSessions = async function() {
   await _origLoadSessions.apply(this, arguments);
+  // The calendar can draw before bookings arrive (open-spot labels then read
+  // 0 booked), so redraw it now that they're here.
+  renderCalendar();
+  // Badge on the Messages tab for new student messages (staff only).
+  if (staffPasswordEntered) loadAllMessages().catch(e => console.error('Could not load messages', e));
   populateCertStudentSelect();
   renderBlackoutList();
   if (document.getElementById('capacity-limit')) {
@@ -4522,6 +4555,7 @@ switchMode = function(mode) {
   document.querySelector('.main')?.classList.toggle('main-wide', mode === 'revenue' || mode === 'rotations');
   if (mode === 'revenue') renderRevenuePage();
   if (mode === 'rotations') renderRotationsPage();
+  if (mode === 'messages') renderMessagesPage();
   if (mode === 'planning') { renderBlackoutList(); populateCertStudentSelect(); renderPortalAccessList(); document.getElementById('capacity-limit').value = getCapacityLimit(); }
 };
 
@@ -5582,6 +5616,120 @@ async function setRotationStatus(r, status) {
   await logRotationActivity('Note', `Status: ${prev || '(none)'} → ${status}`);
   _currentRotation = prevRot;
   showEmailToast(`✓ Moved to ${status}`, 'ok');
+}
+
+// ── MESSAGES TAB ──
+// Coordinator Messages table. "Coordinator Notes" is the reply the student
+// sees in their portal; Status is New / In Progress / Resolved.
+let allMessages = [];
+async function loadAllMessages() {
+  let all = [], offset = '';
+  do {
+    const data = await atRead(STUDENTS_BASE_ID, COORD_MESSAGES_TABLE_ID, `?pageSize=100${offset ? '&offset=' + offset : ''}`);
+    if (!data) throw new Error('Could not reach the server.');
+    all = all.concat((data.records || []).map(r => ({ id: r.id, createdTime: r.createdTime, ...r.fields })));
+    offset = data.offset || '';
+  } while (offset);
+  allMessages = all.sort((a, b) => (b['Submitted'] || b.createdTime || '').localeCompare(a['Submitted'] || a.createdTime || ''));
+  unresolvedMessages = allMessages.filter(m => m['Status'] !== 'Resolved');
+  updateMessagesBadge();
+}
+function updateMessagesBadge() {
+  const b = document.getElementById('msg-tab-badge');
+  if (!b) return;
+  const n = allMessages.filter(m => (m['Status'] || 'New') === 'New').length;
+  b.textContent = n; b.style.display = n ? 'inline-block' : 'none';
+}
+async function renderMessagesPage() {
+  const el = document.getElementById('msg-list');
+  try {
+    if (!studentDirectory.length) await loadStudentDirectory();
+    if (!allRotations.length) await loadAllRotations();
+    await loadAllMessages();
+    renderMessagesList();
+  } catch (e) {
+    console.error(e);
+    el.innerHTML = '<p style="color:var(--red);font-size:13px">Could not load messages. Try Refresh.</p>';
+  }
+}
+function messageStudent(m) {
+  const id = (m['Student'] || [])[0];
+  const email = (m['Student Email'] || '').toLowerCase();
+  return studentDirectory.find(s => s.id === id) || studentDirectory.find(s => splitEmailsClient(s['Email']).includes(email)) || null;
+}
+function renderMessagesList() {
+  const el = document.getElementById('msg-list');
+  if (!el) return;
+  const f = document.getElementById('msg-filter').value;
+  const q = (document.getElementById('msg-search').value || '').trim().toLowerCase();
+  const sessionLabel = id => { const x = allSessions.find(s => s.id === id); return x ? formatDate(x['Session Date']) : ''; };
+  const list = allMessages.filter(m => {
+    const st = m['Status'] || 'New';
+    if (f === 'open' ? st === 'Resolved' : f !== 'all' && st !== f) return false;
+    return !q || [m['Student Name'], m['Student Email'], m['Subject'], m['Message'], m['Coordinator Notes']].join(' ').toLowerCase().includes(q);
+  });
+  if (!list.length) { el.innerHTML = '<div class="card" style="font-size:13px;color:var(--text-muted)">No messages here.</div>'; return; }
+  el.innerHTML = list.map(m => {
+    const st = m['Status'] || 'New';
+    const when = new Date(m['Submitted'] || m.createdTime);
+    const whenText = isNaN(when) ? '—' : when.toLocaleString('en-US', { month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit' });
+    const s = messageStudent(m);
+    const sessions = (m['Session'] || []).map(sessionLabel).filter(Boolean);
+    return `<div class="msg-item ${st === 'New' ? 'is-new' : st === 'In Progress' ? 'is-progress' : 'is-resolved'}">
+      <div style="display:flex;justify-content:space-between;gap:10px;flex-wrap:wrap;align-items:baseline">
+        <div>
+          <strong style="font-size:14px">${escapeHtml(m['Student Name'] || (s && s['Student Name']) || 'Unknown student')}</strong>
+          <span style="color:var(--text-muted);font-size:12px"> · ${escapeHtml(m['Subject'] || 'Message')} · ${whenText}</span>
+        </div>
+        <select onchange="setMessageStatus('${m.id}', this.value)" style="padding:4px 8px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:12px">
+          ${['New', 'In Progress', 'Resolved'].map(x => `<option ${x === st ? 'selected' : ''}>${x}</option>`).join('')}
+        </select>
+      </div>
+      ${sessions.length ? `<div style="font-size:12px;color:var(--text-muted);margin-top:2px">Session: ${escapeHtml(sessions.join(', '))}</div>` : ''}
+      <div style="white-space:pre-wrap;margin-top:8px;font-size:13px">${escapeHtml(m['Message'] || '')}</div>
+      <div style="margin-top:10px">
+        <textarea id="msg-reply-${m.id}" rows="2" placeholder="Reply — the student sees this in their portal" style="width:100%;box-sizing:border-box;padding:7px 9px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:13px">${escapeHtml(m['Coordinator Notes'] || '')}</textarea>
+        <div style="display:flex;gap:8px;margin-top:6px;flex-wrap:wrap">
+          <button class="btn btn-primary btn-sm" onclick="saveMessageReply('${m.id}', true)">Save reply &amp; resolve</button>
+          <button class="btn btn-sm" onclick="saveMessageReply('${m.id}', false)">Save reply</button>
+          ${m['Student Email'] ? `<button class="btn btn-sm" onclick="emailMessageReply('${m.id}')">✉ Reply by email</button>` : ''}
+          ${s ? `<button class="btn btn-sm" onclick="openStudentModalById('${s.id}')">Open student</button>` : ''}
+        </div>
+      </div>
+    </div>`;
+  }).join('');
+}
+async function patchMessage(id, fields) {
+  const res = await atWrite(STUDENTS_BASE_ID, COORD_MESSAGES_TABLE_ID, 'PATCH', `/${id}`, { fields });
+  if (!res) { showEmailToast('Could not save the message.', 'warn'); return false; }
+  const m = allMessages.find(x => x.id === id);
+  if (m) Object.assign(m, fields);
+  unresolvedMessages = allMessages.filter(x => x['Status'] !== 'Resolved');
+  updateMessagesBadge();
+  return true;
+}
+async function setMessageStatus(id, status) {
+  if (await patchMessage(id, { 'Status': status })) renderMessagesList();
+}
+async function saveMessageReply(id, resolve) {
+  const text = (document.getElementById('msg-reply-' + id)?.value || '').trim();
+  const fields = { 'Coordinator Notes': text };
+  if (resolve) fields['Status'] = 'Resolved';
+  else { const m = allMessages.find(x => x.id === id); if (m && (m['Status'] || 'New') === 'New' && text) fields['Status'] = 'In Progress'; }
+  if (await patchMessage(id, fields)) { showEmailToast(resolve ? '✓ Reply saved and resolved.' : '✓ Reply saved.', 'ok'); renderMessagesList(); }
+}
+function emailMessageReply(id) {
+  const m = allMessages.find(x => x.id === id);
+  if (!m) return;
+  const reply = (document.getElementById('msg-reply-' + id)?.value || '').trim();
+  const first = (m['Student Name'] || '').split(/[ ,]+/).filter(Boolean);
+  const name = (m['Student Name'] || '').includes(',') ? (first[1] || '') : (first[0] || '');
+  const body = `Hi ${name || 'there'},\n\n${reply || ''}\n\n— Your message —\n${m['Message'] || ''}\n\nWarm regards,\nThe Preceptor Site`;
+  window.open('https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(m['Student Email']) +
+    '&su=' + encodeURIComponent('Re: ' + (m['Subject'] || 'Your message')) + '&body=' + encodeURIComponent(body), '_blank');
+  // Log on the student's current rotation, if there is one.
+  const s = messageStudent(m), rot = s && rotationsFor(s)[0];
+  if (rot) { const prev = _currentRotation; _currentRotation = rot; logRotationActivity('Email', `Reply to message: ${m['Subject'] || 'Message'} → ${m['Student Email']}`); _currentRotation = prev; }
 }
 
 // ── NEEDS ATTENTION ──
