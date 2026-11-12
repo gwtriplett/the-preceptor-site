@@ -336,6 +336,12 @@
   .rot-board { display:grid; grid-template-columns:repeat(var(--rot-cols,6), minmax(200px,1fr)); gap:12px; overflow-x:auto; padding-bottom:8px; align-items:start; }
   .rot-col { background:var(--gray-50); border:1px solid var(--gray-100); border-radius:var(--radius); padding:10px; min-height:120px; }
   .rot-col-head { display:flex; justify-content:space-between; align-items:center; font-size:12px; font-weight:700; text-transform:uppercase; letter-spacing:.03em; color:var(--text-muted); margin-bottom:10px; }
+  .rot-col-head { cursor:pointer; user-select:none; }
+  .rot-col-head .chev { display:inline-block; width:12px; transition:transform .15s; }
+  .rot-col.collapsed .rot-col-head .chev { transform:rotate(-90deg); }
+  .rot-col.collapsed { min-height:0; }
+  .rot-col.collapsed .rot-col-head { margin-bottom:0; }
+  .rot-col-hidden-note { font-size:11px; color:var(--text-muted); margin-top:6px; }
   .rot-col-count { background:var(--white); border:1px solid var(--gray-100); border-radius:10px; padding:0 7px; font-size:11px; }
   .rot-card { background:var(--white); border:1px solid var(--gray-100); border-radius:8px; padding:9px 10px; margin-bottom:8px; cursor:pointer; font-size:12px; transition:box-shadow .15s; }
   .rot-card:hover { box-shadow:0 2px 8px rgba(0,0,0,.08); }
@@ -4166,6 +4172,25 @@ async function renderRotationsPage() {
     document.getElementById('rot-board').innerHTML = '<p style="color:var(--red);font-size:13px">Could not load rotations. Try Refresh.</p>';
   }
 }
+// Collapsed stages are remembered per browser; "Closed out" and
+// "Withdrawn / terminated" start collapsed since those lists only grow.
+const ROT_COL_DEFAULT_COLLAPSED = ['closed', 'dropped'];
+function rotColState() {
+  try { const v = JSON.parse(localStorage.getItem('rot_cols_collapsed') || 'null'); if (v) return v; } catch (_) {}
+  return _rotColMem;
+}
+function rotColCollapsed(key) {
+  const st = rotColState();
+  return st ? st.includes(key) : ROT_COL_DEFAULT_COLLAPSED.includes(key);
+}
+function toggleRotCol(key) {
+  const cur = ROT_STAGES.map(x => x.key).filter(rotColCollapsed);
+  const next = cur.includes(key) ? cur.filter(k => k !== key) : cur.concat(key);
+  try { localStorage.setItem('rot_cols_collapsed', JSON.stringify(next)); } catch (_) {}
+  _rotColMem = next;
+  renderRotationsBoard();
+}
+let _rotColMem = null;
 function renderRotationsBoard() {
   const board = document.getElementById('rot-board');
   if (!board) return;
@@ -4187,9 +4212,10 @@ function renderRotationsBoard() {
   });
   board.innerHTML = stages.map(st => {
     const list = (cards[st.key] || []).sort((a, b) => (a.r['Requested Start Date'] || '9').localeCompare(b.r['Requested Start Date'] || '9'));
-    return `<div class="rot-col" data-stage="${st.key}" ondragover="rotDragOver(event)" ondragleave="rotDragLeave(event)" ondrop="rotDrop(event)">
-      <div class="rot-col-head"><span>${st.label}</span><span class="rot-col-count">${list.length}</span></div>
-      ${list.map(({ r, s, name, uni, course }) => {
+    const collapsed = rotColCollapsed(st.key);
+    return `<div class="rot-col${collapsed ? ' collapsed' : ''}" data-stage="${st.key}" ondragover="rotDragOver(event)" ondragleave="rotDragLeave(event)" ondrop="rotDrop(event)">
+      <div class="rot-col-head" onclick="toggleRotCol('${st.key}')" title="${collapsed ? 'Show' : 'Hide'} this stage's rotations"><span><span class="chev">▾</span> ${st.label}</span><span class="rot-col-count">${list.length}</span></div>
+      ${collapsed ? (list.length ? `<div class="rot-col-hidden-note">${list.length} hidden — click to show</div>` : '') : (list.map(({ r, s, name, uni, course }) => {
         const h = rotationHours(r);
         const start = r['Requested Start Date'], end = r['Requested End Date'];
         const balance = (r['Billed Amount'] || 0) - (r['Amount Paid'] || 0);
@@ -4208,7 +4234,7 @@ function renderRotationsBoard() {
           ${(() => { const c = checklistStatus(r); return `<span class="rot-card-status" title="Checklist" style="margin-left:4px;${c.done === c.total ? 'background:var(--green-light);color:var(--green)' : ''}">☑ ${c.done}/${c.total}</span>`; })()}
           ${flags.map(f => `<div class="rot-flag">⚠ ${f}</div>`).join('')}
         </div>`;
-      }).join('') || '<div style="font-size:12px;color:var(--gray-400);text-align:center;padding:10px 0">None</div>'}
+      }).join('') || '<div style="font-size:12px;color:var(--gray-400);text-align:center;padding:10px 0">None</div>')}
     </div>`;
   }).join('');
 }
