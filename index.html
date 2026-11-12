@@ -332,6 +332,9 @@
   .cap-badge { font-size:9px; font-weight:600; padding:1px 5px; border-radius:3px; display:inline-block; margin-top:2px; }
   .cap-full { background:var(--red-light); color:var(--red); }
   .cap-open { background:var(--green-light); color:var(--green); }
+  .cap-near { background:var(--amber-light); color:var(--amber); }
+  .seats-label { font-size:10px; font-weight:600; padding:1px 6px; border-radius:10px; margin-left:6px; cursor:default; vertical-align:middle; }
+  .week-header-cell .seats-label { display:inline-block; margin:4px 0 0; text-transform:none; }
 
 
   /* ── REVENUE DASHBOARD ── */
@@ -4419,12 +4422,34 @@ renderMonth = function() {
       if (count > 0) {
         const pct = Math.min(100, Math.round(count/cap*100));
         const cls = count >= cap ? 'capacity-full' : count >= cap-1 ? 'capacity-near' : 'capacity-open';
-        cell.insertAdjacentHTML('beforeend', `<div class="capacity-bar ${cls}" style="width:${pct}%"></div><span class="cap-badge ${count>=cap?'cap-full':'cap-open'}">${count}/${cap}</span>`);
+        cell.insertAdjacentHTML('beforeend', `<div class="capacity-bar ${cls}" style="width:${pct}%"></div>`);
       }
+      dayNum.insertAdjacentHTML('beforeend', seatsLabel(ds));
       if (standby > 0) {
         cell.insertAdjacentHTML('beforeend', `<span class="cap-badge cap-standby" title="Standby — not counted toward capacity">+${standby} standby</span>`);
       }
     }
+  });
+};
+
+// "3 open" / "1 open" / "Full" next to a day; hover shows "4 of 6 booked".
+// Nothing on weekends (clinic closed), past days, or blackout days.
+function seatsLabel(ds) {
+  const d = new Date(ds + 'T12:00:00');
+  if (d.getDay() === 0 || d.getDay() === 6 || ds < isoDate(new Date()) || isBlackout(ds)) return '';
+  const cap = getCapacityLimit(ds), count = getSessionsOnDate(ds), open = Math.max(0, cap - count);
+  const cls = open === 0 ? 'cap-full' : open === 1 ? 'cap-near' : 'cap-open';
+  return `<span class="seats-label ${cls}" title="${count} of ${cap} booked">${open === 0 ? 'Full' : open + ' open'}</span>`;
+}
+const _origRenderWeek = renderWeek;
+renderWeek = function() {
+  _origRenderWeek.apply(this, arguments);
+  const weekStart = new Date(calDate); weekStart.setDate(calDate.getDate() - calDate.getDay());
+  document.querySelectorAll('.week-header-cell').forEach((cell, i) => {
+    if (i === 0) return; // time-column spacer
+    const d = new Date(weekStart); d.setDate(weekStart.getDate() + i - 1);
+    const label = seatsLabel(isoDate(d));
+    if (label) cell.insertAdjacentHTML('beforeend', `<div>${label}</div>`);
   });
 };
 
