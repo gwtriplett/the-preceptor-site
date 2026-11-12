@@ -1136,21 +1136,24 @@
     <div class="rev-card blue"><div class="rev-label">Total Billed</div><div class="rev-val" id="rev-billed" style="color:var(--blue)">—</div><div class="rev-sub">sum of Billed Amount across all rotations</div></div>
     <div class="rev-card green"><div class="rev-label">Amount Paid</div><div class="rev-val" id="rev-collected" style="color:var(--green)">—</div><div class="rev-sub">sum of Amount Paid across all rotations</div></div>
     <div class="rev-card amber"><div class="rev-label">Balance Outstanding</div><div class="rev-val" id="rev-outstanding" style="color:var(--amber)">—</div><div class="rev-sub">billed minus paid</div></div>
-    <div class="rev-card teal"><div class="rev-label">Active Students</div><div class="rev-val" id="rev-active" style="color:var(--teal)">—</div><div class="rev-sub">current rotations</div></div>
+    <div class="rev-card teal"><div class="rev-label">Overdue</div><div class="rev-val" id="rev-active" style="color:var(--red)">—</div><div class="rev-sub" id="rev-overdue-sub">balances past their due date</div></div>
   </div>
 
   <div class="card" style="margin-bottom:16px;padding:0">
     <div style="padding:16px 20px;border-bottom:1px solid var(--gray-100)">
-      <div class="section-title">Per-rotation breakdown</div>
+      <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;flex-wrap:wrap">
+        <div class="section-title">Payments by rotation</div>
+        <label style="font-size:12px;color:var(--text-muted);display:flex;gap:6px;align-items:center"><input type="checkbox" id="rev-owed-only" onchange="renderRevenuePage()" /> Only balances owed</label>
+      </div>
     </div>
     <div class="tbl-wrap">
       <table class="rev-table" id="rev-table">
         <thead><tr>
-          <th>Student</th><th>ID</th><th>University</th>
-          <th>Hours Goal</th><th>Prior Hrs</th><th>Hours Done</th><th>Remaining</th><th>Progress</th>
-          <th>Billed</th><th>Amount Paid</th><th>Balance</th><th>Admission Status</th><th></th>
+          <th>Student</th><th>University</th>
+          <th>Billed</th><th>Amount Paid</th><th>Balance</th>
+          <th>Payment Status</th><th>Method</th><th>Due</th><th>Paid On</th><th></th>
         </tr></thead>
-        <tbody id="rev-tbody"><tr><td colspan="12" style="text-align:center;padding:24px;color:var(--text-muted)">Connect Airtable to load data</td></tr></tbody>
+        <tbody id="rev-tbody"><tr><td colspan="10" style="text-align:center;padding:24px;color:var(--text-muted)">Connect Airtable to load data</td></tr></tbody>
       </table>
     </div>
   </div>
@@ -1201,6 +1204,12 @@
       <div style="margin-top:18px;border-top:1px solid var(--gray-100);padding-top:14px">
         <div style="font-size:12px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:var(--text-muted);margin-bottom:8px">Checklist — this rotation</div>
         <div id="sdm-checklist" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:6px 14px"></div>
+        <div style="margin-top:12px;display:flex;align-items:center;gap:8px;font-size:13px">
+          <label for="sdm-prior-hours">Prior hours completed</label>
+          <input id="sdm-prior-hours" type="number" step="0.5" min="0" placeholder="0" style="width:72px;text-align:center;padding:4px 6px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:12px"
+            onchange="_currentRotation && updatePriorHours(_currentRotation.id, this.value)" title="Hours completed on this rotation before this scheduler was in use" />
+          <span style="font-size:11px;color:var(--text-muted)">before this scheduler was in use</span>
+        </div>
       </div>
 
       <!-- Activity log for the selected rotation -->
@@ -4171,11 +4180,13 @@ function renderRotationsBoard() {
 // ── PRIOR HOURS OVERRIDE (for students who started before this scheduler) ──
 async function updatePriorHours(rotationId, value) {
   const num = value === '' ? 0 : parseFloat(value);
-  if (isNaN(num) || num < 0) { alert('Please enter a valid number of hours.'); renderRevenuePage(); return; }
+  if (isNaN(num) || num < 0) { alert('Please enter a valid number of hours.'); renderRotationChecklist(); return; }
   const res = await atWrite(STUDENTS_BASE_ID, ROTATIONS_TABLE_ID, 'PATCH', `/${rotationId}`, { fields: { 'Prior Hours Completed': num } });
   if (res) {
     showEmailToast('✓ Prior hours saved.', 'ok');
-    await renderRevenuePage();
+    if (rotationById[rotationId]) rotationById[rotationId]['Prior Hours Completed'] = num;
+    if (_currentRotation && _currentRotation.id === rotationId) _currentRotation['Prior Hours Completed'] = num;
+    if (document.getElementById('page-rotations')?.classList.contains('active')) renderRotationsBoard();
   }
 }
 
@@ -4194,11 +4205,13 @@ async function renderRevenuePage() {
       (x.s['Student Name'] || '').localeCompare(y.s['Student Name'] || '') ||
       (x.r['Requested Start Date'] || '').localeCompare(y.r['Requested Start Date'] || ''));
 
-    let totalBilled = 0, totalPaid = 0, activeCount = 0;
+    let totalBilled = 0, totalPaid = 0, overdueCount = 0, overdueAmt = 0;
+    const todayStr = isoDate(new Date());
     allRotations.forEach(r => {
       totalBilled += r['Billed Amount'] || 0;
       totalPaid   += r['Amount Paid']   || 0;
-      if ((r['Pipeline Status'] || '').includes('Active')) activeCount++;
+      const bal = (r['Billed Amount'] || 0) - (r['Amount Paid'] || 0);
+      if (bal > 0 && r['Payment Due Date'] && r['Payment Due Date'] < todayStr) { overdueCount++; overdueAmt += bal; }
     });
 
     const fmt = n => '$' + (n || 0).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
@@ -4206,11 +4219,15 @@ async function renderRevenuePage() {
     document.getElementById('rev-billed').textContent      = fmt(totalBilled);
     document.getElementById('rev-collected').textContent   = fmt(totalPaid);
     document.getElementById('rev-outstanding').textContent = fmt(totalBilled - totalPaid);
-    document.getElementById('rev-active').textContent      = activeCount;
+    document.getElementById('rev-active').textContent      = fmt(overdueAmt);
+    document.getElementById('rev-overdue-sub').textContent = `${overdueCount} rotation${overdueCount === 1 ? '' : 's'} past due date`;
+    if (document.getElementById('rev-owed-only')?.checked) {
+      for (let i = rows.length - 1; i >= 0; i--) if (((rows[i].r['Billed Amount'] || 0) - (rows[i].r['Amount Paid'] || 0)) <= 0) rows.splice(i, 1);
+    }
 
     const tbody = document.getElementById('rev-tbody');
     if (rows.length === 0) {
-      tbody.innerHTML = '<tr><td colspan="13" style="text-align:center;padding:24px;color:var(--text-muted)">No rotations found.</td></tr>';
+      tbody.innerHTML = '<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--text-muted)">No rotations found.</td></tr>';
       return;
     }
 
@@ -4242,32 +4259,22 @@ async function renderRevenuePage() {
           ${firstOfStudent ? `<div style="font-weight:600;font-size:13px">${s['Student Name'] || '—'}</div>` : ''}
           <div style="font-size:11px;color:var(--text-muted)">${rotLabel}${r['Pipeline Status'] ? ' · ' + r['Pipeline Status'] : ''}</div>
         </td>
-        <td style="font-family:monospace;font-size:12px;color:var(--blue)">${firstOfStudent ? (s['Student ID'] || '—') : ''}</td>
         <td style="font-size:12px;color:var(--text-muted)">${firstOfStudent ? (uni || '—') : ''}</td>
-        <td style="text-align:center;font-weight:500">${totalReq}</td>
-        <td style="text-align:center">
-          <input type="number" step="0.5" value="${prior || ''}" placeholder="0"
-            style="width:64px;text-align:center;padding:4px 6px;border:1px solid var(--gray-100);border-radius:6px;font-family:inherit;font-size:12px;"
-            onchange="updatePriorHours('${r.id}', this.value)" title="Hours completed on this rotation before this scheduler was in use" />
-        </td>
-        <td style="text-align:center">${totalDone.toFixed(1)}</td>
-        <td style="text-align:center;font-weight:700;color:${remaining <= 0 ? 'var(--green)' : 'var(--text)'}">${remaining.toFixed(1)}</td>
-        <td>
-          <div class="rev-bar-wrap"><div class="rev-bar" style="width:${pct}%;background:${pct>=100?'var(--green)':pct>=75?'var(--amber)':'var(--blue)'}"></div></div>
-          <div style="font-size:10px;color:var(--text-muted);margin-top:2px">${pct}%</div>
-        </td>
         <td style="font-weight:600;text-align:right;white-space:nowrap">${fmt(billed)}</td>
         <td style="font-weight:600;text-align:right;white-space:nowrap;color:${paid > 0 ? 'var(--green)' : 'var(--text-muted)'}">${paid > 0 ? fmt(paid) : '—'}</td>
         <td style="font-weight:700;text-align:right;white-space:nowrap;color:${balColor}">${balance > 0 ? fmt(balance) : fullyPaid ? '<span style="color:var(--green)">✓ Paid in full</span>' : '—'}</td>
-        <td style="font-size:11px;color:var(--text-muted)">${admStatus}</td>
+        <td style="font-size:12px">${r['Payment Status'] || '—'}</td>
+        <td style="font-size:12px;color:var(--text-muted)">${r['Payment Method'] || '—'}</td>
+        <td style="font-size:12px;white-space:nowrap;${balance > 0 && r['Payment Due Date'] && r['Payment Due Date'] < todayStr ? 'color:var(--red);font-weight:600' : 'color:var(--text-muted)'}">${r['Payment Due Date'] ? formatDate(r['Payment Due Date']) : '—'}</td>
+        <td style="font-size:12px;white-space:nowrap;color:var(--text-muted)">${r['Payment Received Date'] ? formatDate(r['Payment Received Date']) : '—'}</td>
         <td>
-          ${s.id ? `<button class="btn btn-sm btn-primary" onclick="openStudentModalById('${s.id}', '${r.id}')" style="white-space:nowrap;">✉ Email</button>` : ''}
+          ${s.id ? `<button class="btn btn-sm btn-primary" onclick="openStudentModalById('${s.id}', '${r.id}')" style="white-space:nowrap;">Open</button>` : ''}
         </td>
       </tr>`;
     }).join('');
   } catch(e) {
     console.error(e);
-    document.getElementById('rev-tbody').innerHTML = `<tr><td colspan="13" style="text-align:center;padding:24px;color:var(--red)">Error: ${e.message}</td></tr>`;
+    document.getElementById('rev-tbody').innerHTML = `<tr><td colspan="10" style="text-align:center;padding:24px;color:var(--red)">Error: ${e.message}</td></tr>`;
   }
 }
 
@@ -5367,6 +5374,8 @@ function renderRotationChecklist() {
   const el = document.getElementById('sdm-checklist');
   if (!el) return;
   const r = _currentRotation;
+  const prior = document.getElementById('sdm-prior-hours');
+  if (prior) { prior.value = (r && r['Prior Hours Completed']) || ''; prior.disabled = !r; }
   if (!r) { el.innerHTML = '<p style="font-size:12px;color:var(--text-muted)">No rotation selected.</p>'; return; }
   el.innerHTML = checklistStatus(r).items.map(i => `
     <label style="display:flex;gap:8px;align-items:center;font-size:13px;${i.auto ? 'color:var(--text-muted)' : 'cursor:pointer'}" title="${i.auto ? 'Ticks automatically from the date on this rotation' : ''}">
