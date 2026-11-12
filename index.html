@@ -5420,13 +5420,14 @@ function buildAttentionItems() {
       const miss = checklistStatus(r).missingBeforeStart;
       if (miss.length) add('Starting soon', `Starts ${formatDate(start)} (${daysBetween(today, start)} days) — missing: ${miss.join(', ')}`, start);
     }
-    // Behind on hours pace (in progress, at least a week in)
-    if (stage === 'active' && start && end && start < today && end > today) {
-      const h = rotationHours(r), span = daysBetween(start, end), gone = daysBetween(start, today);
-      if (h.goal && span > 0 && gone >= 7) {
-        const expected = Math.round(h.goal * gone / span);
-        if (h.done < expected * 0.8) add('Behind on hours', `${h.done} of ${h.goal} hrs — about ${expected} expected by now (ends ${formatDate(end)})`, end);
-      }
+    // Short on hours: signed-off + prior + upcoming booked sessions (Pending/
+    // Approved, from today on) still won't reach the Hours Goal.
+    if (['ready', 'active'].includes(stage) && end && end >= today) {
+      const h = rotationHours(r);
+      const booked = allSessions.filter(x => (x['Rotation'] || []).includes(r.id) && (x['Session Date'] || '') >= today
+        && ['Pending', 'Approved'].includes(x['Approval Status'])).reduce((t, x) => t + (x['Hours This Session'] || 0), 0);
+      const planned = Math.round((h.done + booked) * 10) / 10;
+      if (h.goal && planned < h.goal) add('Short on hours', `${h.done} done + ${Math.round(booked * 10) / 10} booked = ${planned} of ${h.goal} hrs — ${Math.round((h.goal - planned) * 10) / 10} more needed by ${formatDate(end)}`, end);
     }
     // Ended but not closed out
     if (['active', 'hoursdone', 'ready'].includes(stage) && end && end < today) {
@@ -5453,7 +5454,7 @@ function buildAttentionItems() {
 }
 function splitEmailsClient(v) { return String(v || '').toLowerCase().split(/[\s,;]+/).filter(Boolean); }
 const ATTENTION_KINDS = [
-  ['Starting soon', 'var(--amber)'], ['Behind on hours', 'var(--amber)'], ['Not closed out', 'var(--blue)'],
+  ['Starting soon', 'var(--amber)'], ['Short on hours', 'var(--amber)'], ['Not closed out', 'var(--blue)'],
   ['Unpaid balance', 'var(--red)'], ['Unanswered message', 'var(--blue)'],
 ];
 function renderAttention() {
