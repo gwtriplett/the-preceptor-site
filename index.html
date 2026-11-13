@@ -5928,7 +5928,8 @@ function emailShortOnHours(rotId) {
   if (!to) { showEmailToast('No email on file for this student.', 'warn'); return; }
   const h = rotationHours(r);
   const need = Math.round((h.goal - h.planned) * 10) / 10;
-  const first = (s['Student Name'] || '').split(' ')[0] || 'there';
+  const nm = (s['Student Name'] || '').trim();
+  const first = ((nm.includes(',') ? nm.split(',')[1] : nm).trim().split(/\s+/)[0] || 'there').replace(/[^\w'-]/g, '') || 'there';
   const end = formatDate(r['Requested End Date']);
   const subject = `Scheduling your remaining clinical hours`;
   const body = `Hi ${first},\n\nQuick check-in on your rotation. You have ${h.done} hours completed and ${h.booked} hours booked, for ${h.planned} of your ${h.goal}-hour goal. That leaves ${need} more hours to schedule before your rotation ends on ${end}.\n\nPlease log in to the student portal and book your remaining sessions as soon as you can so we can hold spots for you.\n\nThank you!`;
