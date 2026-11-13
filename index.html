@@ -988,7 +988,6 @@
     <div id="s-rotation-cards" class="rot-cards"></div>
 
     <!-- PACE TRACKER -->
-    <div id="s-pace-card" style="margin-bottom:16px"></div>
 
     <!-- COMPLETION CERTIFICATE DOWNLOAD (shows at 100%) -->
     <div id="s-cert-download" style="display:none" class="cert-download-card">
@@ -3561,8 +3560,6 @@ async function lookupStudent() {
   window._studentPortalRecordId = studentRecord.id;
 
   // Pace tracker
-  const lastDate = sessions.length ? sessions[sessions.length - 1]['Session Date'] : ((rotation && rotation['Requested End Date']) || null);
-  renderPaceTracker(totalDone, goalSet ? totalReq : 0, lastDate);
 
   // Completion certificate button
   const certBtn = document.getElementById('s-cert-download');
@@ -3657,36 +3654,6 @@ function setPortalTab(tab, el) {
     if (el) el.style.display = t === tab ? 'block' : 'none';
   });
   if (tab === 'message') loadStudentMessageHistory();
-}
-
-// ── PACE TRACKER ──────────────────────────────────────
-function renderPaceTracker(totalDone, totalReq, endDateStr) {
-  const card = document.getElementById('s-pace-card');
-  if (!card || !totalReq || !endDateStr) { if(card) card.innerHTML=''; return; }
-  const today = new Date(); today.setHours(0,0,0,0);
-  const end = new Date(endDateStr + 'T12:00:00');
-  const daysLeft = Math.max(0, Math.ceil((end - today) / 86400000));
-  const remaining = Math.max(0, totalReq - totalDone);
-  const pct = Math.min(100, Math.round(totalDone / totalReq * 100));
-  if (remaining <= 0) { card.innerHTML = ''; return; }
-  const hrsPerDay = daysLeft > 0 ? (remaining / daysLeft).toFixed(1) : '∞';
-  const onTrack = daysLeft > 0 && (remaining / daysLeft) <= 8;
-  const cls = remaining <= 0 ? 'pace-ahead' : onTrack ? 'pace-on-track' : 'pace-behind';
-  const icon = remaining <= 0 ? '✅' : onTrack ? '📈' : '⚠️';
-  const msg = remaining <= 0
-    ? "You've completed all your required hours!"
-    : onTrack
-      ? `You're on track — ${hrsPerDay} hrs/day needed over ${daysLeft} days remaining.`
-      : `You're behind pace — you need ${hrsPerDay} hrs/day over ${daysLeft} days. Schedule more sessions soon.`;
-  const color = remaining <= 0 ? 'var(--teal)' : onTrack ? 'var(--green)' : 'var(--red)';
-  card.innerHTML = `<div class="pace-card ${cls}">
-    <div class="pace-icon">${icon}</div>
-    <div>
-      <div style="font-weight:600;font-size:14px;color:${color}">${remaining <= 0 ? 'Rotation complete' : onTrack ? 'On track' : 'Behind pace'}</div>
-      <div style="font-size:13px;color:var(--text-muted);margin-top:2px">${msg}</div>
-      <div style="font-size:11px;color:var(--text-muted);margin-top:4px">${totalDone.toFixed(1)} of ${totalReq} hrs completed · ${pct}% · ${daysLeft} days until end date</div>
-    </div>
-  </div>`;
 }
 
 // ── STUDENT AVAILABILITY ──────────────────────────────
