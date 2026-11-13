@@ -5996,7 +5996,7 @@ function emailAvailableDates(rotId, studentId) {
   const left = h.goal ? Math.max(0, Math.round((h.goal - h.planned) * 10) / 10) : null;
   const MAX = 15;
   const lines = list.slice(0, MAX).map(o => `  • ${new Date(o.ds + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} — ${o.open} slot${o.open === 1 ? '' : 's'} open${o.dow === 5 ? ' (Fri, 10 AM–3 PM)' : ''}`);
-  const link = 'https://sked.thepreceptorsite.com/' + (s['Student ID'] ? '?sid=' + encodeURIComponent(s['Student ID']) : '');
+  const link = 'https://thepreceptorsite.netlify.app/' + (s['Student ID'] ? '?sid=' + encodeURIComponent(s['Student ID']) : '');
   const plan = left == null ? '' : left > 0
     ? `You still have about ${left} hours to schedule — roughly ${Math.ceil(left / PLAN_HOURS_PER_DAY)} more days at 8 hours a day.\n\n`
     : `You've already booked enough hours to reach your goal — these are here in case you need to add or move a day.\n\n`;
