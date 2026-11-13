@@ -2053,7 +2053,7 @@ async function loadSessions() {
     all = all.concat(data.records || []);
     offset = data.offset || '';
   } while (offset);
-  allSessions = all.map(r => ({ id: r.id, ...r.fields }));
+  allSessions = all.map(r => ({ id: r.id, createdTime: r.createdTime, ...r.fields }));
   updateStats(allSessions);
   renderTable();
   renderCancelRequests();
@@ -2523,6 +2523,15 @@ async function loadAllRotations() {
   Object.values(rotationsByStudent).forEach(list =>
     list.sort((a, b) => (b['Requested Start Date'] || '').localeCompare(a['Requested Start Date'] || '')));
   return allRotations;
+}
+// Test students: "(TEST)" in the name (e.g. "Doe, Jane (TEST)"). Hidden from
+// Rotations, Needs attention, Revenue and seat counts so test data never
+// takes a real slot. They still work normally in the student portal.
+function isTestName(name) { return /\(TEST\)/i.test(String(name || '')); }
+function isTestRotation(r) {
+  const sid = (r && r['Student'] || [])[0];
+  const st = (window._studentMap || {})[sid] || (typeof studentDirectory !== 'undefined' && studentDirectory.find(x => x.id === sid)) || {};
+  return isTestName(st['Student Name']);
 }
 function rotationsFor(student) { return (student && rotationsByStudent[student.id]) || []; }
 
@@ -3047,6 +3056,10 @@ function renderStudentOpenDates() {
   if (!rots.length) { el.innerHTML = ''; return; }
   const list = studentOpenDates();
   window._studentOpenCount = list.length;
+  // Rotations whose booked + done hours already reach the goal: requests still
+  // allowed, but the buttons say so.
+  const fullyBooked = new Set(rots.filter(r => typeof r['Hours Goal'] === 'number'
+    && computeRotationHours(r, window._studentTrackerSessions || []).remaining <= 0).map(r => r.id));
   const oc = document.getElementById('sess-view-open-count'); if (oc) oc.textContent = list.length;
   const multi = rots.length > 1;
   const shown = _openDatesShowAll ? list : list.slice(0, 10);
@@ -3059,7 +3072,9 @@ function renderStudentOpenDates() {
         <div style="min-width:130px;font-weight:600">${new Date(o.ds + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>
         <span class="seats-label ${o.open === 1 ? 'cap-near' : 'cap-open'}">${o.open} slot${o.open === 1 ? '' : 's'} open</span>
         ${multi ? `<span style="color:var(--text-muted);font-size:12px">${escapeHtml(o.course)}</span>` : ''}
-        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="requestOpenDate('${o.ds}','${o.rotId}')">Request</button>
+        ${fullyBooked.has(o.rotId)
+          ? `<button class="btn btn-sm" style="margin-left:auto" title="You've already booked enough hours for your goal" onclick="requestOpenDate('${o.ds}','${o.rotId}')">Add only if needed</button>`
+          : `<button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="requestOpenDate('${o.ds}','${o.rotId}')">Request</button>`}
       </div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">No available dates left in your rotation window. Message your coordinator if you need help finding time.</div>'}
     ${list.length > 10 ? `<div style="margin-top:8px"><a href="javascript:void(0)" onclick="_openDatesShowAll=!_openDatesShowAll;renderStudentOpenDates()" style="font-size:13px;color:var(--blue-dark);font-weight:600">${_openDatesShowAll ? 'Show fewer' : `Show all ${list.length} available days`}</a></div>` : ''}
   </div>`;
@@ -3569,6 +3584,7 @@ async function lookupStudent() {
   setPortalTab('sessions', document.querySelector('.portal-tab'));
 
   const list = document.getElementById('student-sessions-list');
+  window._studentPortalSessions = sessions;
   const sessionCard = s => {
     const status = s['Approval Status'] || 'Pending';
     const d = s['Session Date'] ? new Date(s['Session Date'] + 'T12:00:00') : null;
@@ -3590,6 +3606,9 @@ async function lookupStudent() {
         : `<button class="cancel-session-btn" onclick="requestCancelSession('${s.id}','${formatDate(s['Session Date'])}','${(s['Clinical Focus']||'').replace(/'/g,"\'")}', this)">Request cancellation</button>`)
       : '';
     const checklist = ''; // Pre-session checklist disabled for now
+    const calBtn = status === 'Approved' && (s['Session Date'] || '') >= isoDate(new Date())
+      ? `<div style="margin-top:6px;display:flex;gap:6px;flex-wrap:wrap"><a class="btn btn-sm" style="padding:3px 10px;font-size:11px;text-decoration:none" target="_blank" rel="noopener" href="${googleCalUrl(s)}">📅 Add to Google Calendar</a><button class="btn btn-sm" style="padding:3px 10px;font-size:11px" onclick="downloadSessionIcs('${s.id}')">⬇ Apple / Outlook</button></div>`
+      : '';
     return `<div class="session-card">
       <div class="session-date-col">
         <div class="session-month">${month}</div>
@@ -3602,6 +3621,7 @@ async function lookupStudent() {
         ${signedOff}
         ${s['Preceptor Notes'] ? `<div style="font-size:11px;color:var(--text-muted);margin-top:4px;font-style:italic">Preceptor note: ${s['Preceptor Notes']}</div>` : ''}
         ${checklist}
+        ${calBtn}
         ${cancelBtn}
       </div>
       <div class="session-status-col">
@@ -3637,6 +3657,42 @@ function setSessionsView(view, auto) {
   if (oc) oc.textContent = window._studentOpenCount ?? '';
 }
 
+
+// ── ADD TO CALENDAR (approved sessions) ──
+const CLINIC_ADDRESS = '3520 High St, Portsmouth, VA 23707';
+function calTime(t, fallback) {
+  const m = String(t || '').trim().match(/^(\d{1,2}):(\d{2})\s*([AaPp][Mm])?$/);
+  if (!m) return fallback;
+  let h = +m[1]; const min = m[2], ap = (m[3] || '').toUpperCase();
+  if (ap === 'PM' && h < 12) h += 12; if (ap === 'AM' && h === 12) h = 0;
+  return String(h).padStart(2, '0') + min + '00';
+}
+function sessionCalParts(s) {
+  const d = (s['Session Date'] || '').replace(/-/g, '');
+  const fri = new Date(s['Session Date'] + 'T12:00:00').getDay() === 5;
+  return { start: d + 'T' + calTime(s['Start Time'], fri ? '100000' : '080000'), end: d + 'T' + calTime(s['End Time'], fri ? '150000' : '170000'),
+    title: 'Clinical session — The Preceptor Site',
+    details: `${s['Clinical Focus'] ? 'Focus: ' + s['Clinical Focus'] + '\n' : ''}Approved clinical session. Bring your photo ID badge and arrive on time.\nNeed to cancel? Give written notice (scheduler or coordinator@thepreceptorsite.com) at least 48 hours ahead.` };
+}
+function googleCalUrl(s) {
+  const p = sessionCalParts(s);
+  return 'https://calendar.google.com/calendar/render?action=TEMPLATE&text=' + encodeURIComponent(p.title) + '&dates=' + p.start + '/' + p.end
+    + '&ctz=America/New_York&location=' + encodeURIComponent(CLINIC_ADDRESS) + '&details=' + encodeURIComponent(p.details);
+}
+function downloadSessionIcs(id) {
+  const s = (window._studentPortalSessions || allSessions || []).find(x => x.id === id);
+  if (!s) return;
+  const p = sessionCalParts(s);
+  const esc = v => String(v).replace(/[\\;,]/g, m => '\\' + m).replace(/\n/g, '\\n');
+  const ics = ['BEGIN:VCALENDAR', 'VERSION:2.0', 'PRODID:-//The Preceptor Site//Scheduler//EN', 'BEGIN:VEVENT',
+    'UID:' + id + '@thepreceptorsite.com', 'DTSTAMP:' + new Date().toISOString().replace(/[-:]/g, '').slice(0, 15) + 'Z',
+    'DTSTART;TZID=America/New_York:' + p.start, 'DTEND;TZID=America/New_York:' + p.end,
+    'SUMMARY:' + esc(p.title), 'LOCATION:' + esc(CLINIC_ADDRESS), 'DESCRIPTION:' + esc(p.details), 'END:VEVENT', 'END:VCALENDAR'].join('\r\n');
+  const a = document.createElement('a');
+  a.href = URL.createObjectURL(new Blob([ics], { type: 'text/calendar' }));
+  a.download = 'clinical-session-' + s['Session Date'] + '.ics';
+  document.body.appendChild(a); a.click(); a.remove();
+}
 
 // ── STUDENT PORTAL TABS ──────────────────────────────
 function setPortalTab(tab, el) {
@@ -4144,7 +4200,7 @@ function sessionSeatStatus(s) {
   return (rot && rot['Seat Status']) || 'Confirmed';
 }
 function activeSessionsOnDate(dateStr) {
-  return allSessions.filter(s => s['Session Date'] === dateStr && ['Approved','Pending','Completed'].includes(s['Approval Status']));
+  return allSessions.filter(s => s['Session Date'] === dateStr && ['Approved','Pending','Completed'].includes(s['Approval Status']) && !isTestName(s['Student Name']));
 }
 function getSessionsOnDate(dateStr) {
   return activeSessionsOnDate(dateStr).filter(s => sessionSeatStatus(s) === 'Confirmed').length;
@@ -4399,6 +4455,7 @@ function renderRotationsBoard() {
   const today = isoDate(new Date());
   const cards = {};
   allRotations.forEach(r => {
+    if (isTestRotation(r)) return;
     const s = (window._studentMap || {})[(r['Student'] || [])[0]] || {};
     const name = s['Student Name'] || '(no student linked)';
     const uni = s['University / College'] || multiSelectText(r['University (from Student)']) || '';
@@ -4462,14 +4519,15 @@ async function renderRevenuePage() {
     const studentsById = {};
     studentDirectory.forEach(s => { studentsById[s.id] = s; });
 
-    const rows = allRotations.map(r => ({ r, s: studentsById[(r['Student'] || [])[0]] || {} }));
+    const realRotations = allRotations.filter(r => !isTestName((studentsById[(r['Student'] || [])[0]] || {})['Student Name']));
+    const rows = realRotations.map(r => ({ r, s: studentsById[(r['Student'] || [])[0]] || {} }));
     rows.sort((x, y) =>
       (x.s['Student Name'] || '').localeCompare(y.s['Student Name'] || '') ||
       (x.r['Requested Start Date'] || '').localeCompare(y.r['Requested Start Date'] || ''));
 
     let totalBilled = 0, totalPaid = 0, overdueCount = 0, overdueAmt = 0;
     const todayStr = isoDate(new Date());
-    allRotations.forEach(r => {
+    realRotations.forEach(r => {
       totalBilled += r['Billed Amount'] || 0;
       totalPaid   += r['Amount Paid']   || 0;
       const bal = (r['Billed Amount'] || 0) - (r['Amount Paid'] || 0);
@@ -6009,7 +6067,7 @@ function buildAttentionItems() {
   const studentOf = r => (window._studentMap || {})[(r['Student'] || [])[0]] || {};
   allRotations.forEach(r => {
     const stage = rotationStage(r);
-    if (stage === 'dropped') return;
+    if (stage === 'dropped' || isTestRotation(r)) return;
     const s = studentOf(r), name = s['Student Name'] || '(no student)';
     const start = r['Requested Start Date'], end = r['Requested End Date'];
     const open = s.id ? `openStudentModalById('${s.id}','${r.id}')` : '';
@@ -6042,10 +6100,44 @@ function buildAttentionItems() {
       add('Unpaid balance', `$${balance.toLocaleString('en-US', { minimumFractionDigits: 2 })} owed${due ? ' — due ' + formatDate(due) : ''}`, due || start);
     }
   });
+  // Pending session requests older than 2 business days (policy: reply within 2)
+  // and future bookings left on rotations that are already Released.
+  const nameFor = x => x['Student Name'] || x['Student Email'] || 'Unknown student';
+  const studentFor = x => studentDirectory.find(st => st.id === x['Student ID (Airtable)'])
+    || studentDirectory.find(st => splitEmailsClient(st['Email']).includes((x['Student Email'] || '').toLowerCase())) || {};
+  const releasedGroups = {};
+  (allSessions || []).forEach(x => {
+    if (isTestName(x['Student Name'])) return;
+    const st = x['Approval Status'] || 'Pending', d = x['Session Date'] || '';
+    if (st === 'Pending' && d >= today) {
+      const sub = (x.createdTime || '').slice(0, 10);
+      const wait = sub ? businessDaysBetween(sub, today) : 0;
+      if (wait > 2) {
+        const stu = studentFor(x);
+        items.push({ kind: 'Waiting on approval', name: nameFor(x),
+          text: `${formatDate(d)}, ${x['Start Time'] || '?'}–${x['End Time'] || '?'} (${x['Hours This Session'] ?? '?'} hrs) — requested ${formatDate(sub)}, ${wait} business days ago`,
+          open: stu.id ? `openStudentModalById('${stu.id}')` : '', sort: sub,
+          action: `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn btn-success btn-sm" style="padding:3px 10px;font-size:11px" onclick="event.stopPropagation();quickSessionStatus('${x.id}','Approved',this)">✓ Approve</button><button class="btn btn-sm" style="padding:3px 10px;font-size:11px" onclick="event.stopPropagation();quickSessionStatus('${x.id}','Denied',this)">✕ Deny</button></div>` });
+      }
+    }
+    if (['Pending', 'Approved'].includes(st) && d >= today) {
+      const rot = rotationById[(x['Rotation'] || [])[0]];
+      if (rot && rot['Seat Status'] === 'Released') (releasedGroups[rot.id] = releasedGroups[rot.id] || { rot, list: [], x }).list.push(x);
+    }
+  });
+  Object.values(releasedGroups).forEach(({ rot, list, x }) => {
+    const stu = studentFor(x);
+    list.sort((a, b) => (a['Session Date'] || '').localeCompare(b['Session Date'] || ''));
+    items.push({ kind: 'Booked on a closed rotation', name: nameFor(x),
+      text: `Rotation is "${rot['Pipeline Status']}" but ${list.length} future session${list.length === 1 ? ' is' : 's are'} still on the calendar: ${list.slice(0, 4).map(y => formatDate(y['Session Date'])).join(', ')}${list.length > 4 ? '…' : ''}`,
+      open: stu.id ? `openStudentModalById('${stu.id}','${rot.id}')` : '', sort: list[0]['Session Date'],
+      action: `<button class="btn btn-sm" style="margin-top:6px;padding:3px 10px;font-size:11px" onclick="event.stopPropagation();cancelReleasedSessions('${list.map(y => y.id).join(',')}',this)">Cancel ${list.length === 1 ? 'it' : 'these ' + list.length} — frees the seat${list.length === 1 ? '' : 's'}</button>` });
+  });
   // Unanswered student messages
   unresolvedMessages.forEach(m => {
     const email = (m['Student Email'] || '').toLowerCase();
     const s = studentDirectory.find(x => splitEmailsClient(x['Email']).includes(email)) || {};
+    if (isTestName(s['Student Name'] || m['Student Name'])) return;
     const r = s.id ? (rotationsFor(s)[0] || null) : null;
     const when = (m['Submitted'] || m.createdTime || '').slice(0, 10);
     items.push({ kind: 'Unanswered message', name: s['Student Name'] || m['Student Email'] || 'Unknown student',
@@ -6054,8 +6146,38 @@ function buildAttentionItems() {
   });
   return items;
 }
+function businessDaysBetween(a, b) {
+  let n = 0; const d = new Date(a + 'T12:00:00'), end = new Date(b + 'T12:00:00');
+  while (d < end) { d.setDate(d.getDate() + 1); if (d.getDay() !== 0 && d.getDay() !== 6) n++; }
+  return n;
+}
+// Quiet approve/deny from Needs attention — no email, no name prompt.
+async function quickSessionStatus(id, status, btn) {
+  if (status === 'Denied' && !confirm('Deny this session request? No email is sent; the student sees "Not approved" in their portal.')) return;
+  if (btn) { btn.disabled = true; btn.textContent = '…'; }
+  const today = isoDate(new Date());
+  const fields = status === 'Approved' ? { 'Approval Status': 'Approved', 'Approved By': 'Coordinator', 'Approved Date': today } : { 'Approval Status': 'Denied' };
+  const res = await airtableRequest('PATCH', `/${id}`, { fields });
+  if (!res) { showEmailToast('Could not update the session.', 'warn'); if (btn) { btn.disabled = false; btn.textContent = status === 'Approved' ? '✓ Approve' : '✕ Deny'; } return; }
+  const s = allSessions.find(x => x.id === id); if (s) Object.assign(s, fields);
+  showEmailToast(`Session ${status === 'Approved' ? 'approved' : 'denied'}.`, 'ok');
+  renderAttention(); renderCalendar();
+}
+async function cancelReleasedSessions(idList, btn) {
+  const ids = idList.split(',').filter(Boolean);
+  if (!confirm(`Cancel ${ids.length} future session${ids.length === 1 ? '' : 's'} on this closed rotation? No email is sent.`)) return;
+  if (btn) { btn.disabled = true; btn.textContent = 'Cancelling…'; }
+  for (let i = 0; i < ids.length; i += 10) {
+    const res = await airtableRequest('PATCH', '', { records: ids.slice(i, i + 10).map(id => ({ id, fields: { 'Approval Status': 'Cancelled' } })) });
+    if (!res) { showEmailToast('Stopped partway — some sessions may not be cancelled. Refresh and check.', 'warn'); return; }
+    ids.slice(i, i + 10).forEach(id => { const s = allSessions.find(x => x.id === id); if (s) s['Approval Status'] = 'Cancelled'; });
+  }
+  showEmailToast(`Cancelled ${ids.length} session${ids.length === 1 ? '' : 's'}.`, 'ok');
+  renderAttention(); renderCalendar();
+}
 function splitEmailsClient(v) { return String(v || '').toLowerCase().split(/[\s,;]+/).filter(Boolean); }
 const ATTENTION_KINDS = [
+  ['Waiting on approval', 'var(--red)'], ['Booked on a closed rotation', 'var(--red)'],
   ['Starting soon', 'var(--amber)'], ['Short on hours', 'var(--amber)'], ['Not closed out', 'var(--blue)'], ['Ready to close out', 'var(--green)'],
   ['Unpaid balance', 'var(--red)'], ['Unanswered message', 'var(--blue)'],
 ];

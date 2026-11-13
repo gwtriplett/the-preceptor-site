@@ -43,9 +43,10 @@ function scope(table: string, rec: any, id: StudentIdentity): any | null {
     case MESSAGES_TABLE_ID:
       return splitEmails(f["Student Email"]).some((e) => id.emails.has(e)) ? rec : null;
     case SESSIONS_TABLE_ID:
-      return ownsSession(id, f)
-        ? rec
-        : { id: rec.id, createdTime: rec.createdTime, fields: { ...pick(f, SLOT_FIELDS), "Student Name": "Booked" } };
+      if (ownsSession(id, f)) return rec;
+      // Other students' test bookings ("(TEST)" names) don't take a seat.
+      if (/\(TEST\)/i.test(String(f["Student Name"] || ""))) return null;
+      return { id: rec.id, createdTime: rec.createdTime, fields: { ...pick(f, SLOT_FIELDS), "Student Name": "Booked" } };
     case SETTINGS_TABLE_ID:
       return { id: rec.id, createdTime: rec.createdTime, fields: pick(f, SETTINGS_FIELDS) };
     default:

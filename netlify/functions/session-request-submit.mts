@@ -344,7 +344,7 @@ export default async (req: Request, context: Context) => {
     }
 
     const capDates = [...new Set(validRows.map((r: any) => (r.date || "").toString()))];
-    const capFormula = `AND(OR(${capDates.map((d) => `DATESTR({Session Date})="${d}"`).join(",")}), OR({Approval Status}="Pending",{Approval Status}="Approved",{Approval Status}="Completed"))`;
+    const capFormula = `AND(OR(${capDates.map((d) => `DATESTR({Session Date})="${d}"`).join(",")}), OR({Approval Status}="Pending",{Approval Status}="Approved",{Approval Status}="Completed"), NOT(FIND("(TEST)", {Student Name}&"")))`;
     let daySessions: any[] = [];
     let offset = "";
     do {
