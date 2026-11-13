@@ -5967,7 +5967,7 @@ function buildAttentionItems() {
     }
     // Short on hours: done + booked still won't reach the Hours Goal.
     // Only from 15 days before the start date through the end date.
-    if (['ready', 'active'].includes(stage) && end && end >= today && start && daysBetween(today, start) <= 15) {
+    if (['Enrollment Completed', '3rd Party Preceptor Enrollment', '🟢 Active Rotation'].includes(r['Pipeline Status']) && end && end >= today && start && daysBetween(today, start) <= 15) {
       const h = rotationHours(r);
       if (h.goal && h.planned < h.goal) add('Short on hours', `${h.done} done + ${h.booked} booked = ${h.planned} of ${h.goal} hrs — ${Math.round((h.goal - h.planned) * 10) / 10} more needed by ${formatDate(end)}`, end,
         splitEmailsClient(s['Email']).length ? `<button class="btn btn-secondary" style="margin-top:6px;padding:3px 10px;font-size:11px" onclick="event.stopPropagation();emailShortOnHours('${r.id}')">📧 Email student</button>` : '');
