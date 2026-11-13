@@ -1010,6 +1010,7 @@
         <span class="section-title">Your sessions</span>
         <button class="btn btn-primary btn-sm" onclick="openStudentRequestModal()">+ Request a session</button>
       </div>
+      <div id="student-open-dates" style="margin-bottom:16px"></div>
       <div id="student-sessions-list"></div>
     </div>
 
@@ -3001,6 +3002,65 @@ function openStudentRequestModal(prefillDate) {
   openModal('request-modal');
 }
 
+// ── OPEN DATES LIST (student portal) ──
+// Every weekday in the student's schedulable rotation(s), from tomorrow to the
+// end date, that still has a seat — so students can pick instead of guess.
+// Counts are a guide; the server re-checks capacity when the request is sent.
+let _openDatesShowAll = false;
+function studentOpenDates() {
+  const rots = (window._studentPortalRotations || []).filter(isSchedulableRotation);
+  const tmr = new Date(); tmr.setDate(tmr.getDate() + 1);
+  const from = isoDate(tmr);
+  const mine = new Set((allSessions || []).filter(x => ['Pending', 'Approved', 'Completed'].includes(x['Approval Status'])
+    && (x['Student ID (Airtable)'] === window._studentPortalRecordId
+      || splitEmailsClient(window._studentPortalEmail).includes((x['Student Email'] || '').toLowerCase()))).map(x => x['Session Date']));
+  const out = [];
+  rots.forEach(r => {
+    const start = r['Requested Start Date'], end = r['Requested End Date'];
+    if (!start || !end) return;
+    const d = new Date((start > from ? start : from) + 'T12:00:00');
+    for (; isoDate(d) <= end; d.setDate(d.getDate() + 1)) {
+      const ds = isoDate(d), dow = d.getDay();
+      if (dow === 0 || dow === 6 || isBlackout(ds) || mine.has(ds)) continue;
+      const open = Math.max(0, getCapacityLimit(ds) - getSessionsOnDate(ds));
+      if (open > 0) out.push({ ds, dow, open, rotId: r.id, course: r['Course Name'] || 'Rotation' });
+    }
+  });
+  return out.sort((a, b) => a.ds.localeCompare(b.ds));
+}
+function renderStudentOpenDates() {
+  const el = document.getElementById('student-open-dates');
+  if (!el || !document.getElementById('student-results') || document.getElementById('student-results').style.display === 'none') return;
+  const rots = (window._studentPortalRotations || []).filter(isSchedulableRotation);
+  if (!rots.length) { el.innerHTML = ''; return; }
+  const list = studentOpenDates();
+  const multi = rots.length > 1;
+  const shown = _openDatesShowAll ? list : list.slice(0, 10);
+  el.innerHTML = `<div class="card" style="padding:14px 16px">
+    <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px">
+      <span style="font-weight:700;font-size:14px">📅 Open dates you can request</span>
+      <span style="font-size:12px;color:var(--text-muted)">${list.length} open day${list.length === 1 ? '' : 's'} · Mon–Thu 8 AM–5 PM, Fri 10 AM–3 PM</span>
+    </div>
+    ${list.length ? shown.map(o => `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--gray-50);font-size:13px">
+        <div style="min-width:130px;font-weight:600">${new Date(o.ds + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>
+        <span class="seats-label ${o.open === 1 ? 'cap-near' : 'cap-open'}">${o.open} slot${o.open === 1 ? '' : 's'} open</span>
+        ${multi ? `<span style="color:var(--text-muted);font-size:12px">${escapeHtml(o.course)}</span>` : ''}
+        <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="requestOpenDate('${o.ds}','${o.rotId}')">Request</button>
+      </div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">No open dates left in your rotation window. Message your coordinator if you need help finding time.</div>'}
+    ${list.length > 10 ? `<div style="margin-top:8px"><a href="javascript:void(0)" onclick="_openDatesShowAll=!_openDatesShowAll;renderStudentOpenDates()" style="font-size:13px;color:var(--blue-dark);font-weight:600">${_openDatesShowAll ? 'Show fewer' : `Show all ${list.length} open days`}</a></div>` : ''}
+  </div>`;
+}
+function requestOpenDate(ds, rotId) {
+  openStudentRequestModal(ds);
+  const sel = document.getElementById('req-rotation');
+  if (sel && [...sel.options].some(o => o.value === rotId)) { sel.value = rotId; updateRotationHint(); }
+  const dow = new Date(ds + 'T12:00:00').getDay();
+  if (dow === 5) { document.getElementById('req-start').value = '10:00'; document.getElementById('req-end').value = '15:00'; }
+  const hrs = document.getElementById('req-hours');
+  if (hrs && !hrs.value) hrs.value = calcHours(document.getElementById('req-start').value, document.getElementById('req-end').value);
+  ['req-date', 'req-start', 'req-end'].forEach(id => document.getElementById(id).dispatchEvent(new Event('change', { bubbles: true })));
+}
+
 function openCalendarRequestModal(prefillDate) {
   if (sessionStorage.getItem('tps_auth') === 'student') openStudentRequestModal(prefillDate);
   else openStaffRequestModal(prefillDate);
@@ -3418,6 +3478,7 @@ async function lookupStudent() {
   // predates this migration and has no Rotation on file.
   const rotations = await loadStudentRotations(studentRecord);
   window._studentPortalRotations = rotations;
+  setTimeout(renderStudentOpenDates, 0);
   const rotation = pickCurrentRotation(rotations);
   const totalReq = (rotation && typeof rotation['Hours Goal'] === 'number')
     ? rotation['Hours Goal']
@@ -4667,6 +4728,7 @@ loadSessions = async function() {
   // The calendar can draw before bookings arrive (open-spot labels then read
   // 0 booked), so redraw it now that they're here.
   renderCalendar();
+  renderStudentOpenDates();
   // Badge on the Messages tab for new student messages (staff only).
   if (staffPasswordEntered) loadAllMessages().catch(e => console.error('Could not load messages', e));
   populateCertStudentSelect();
@@ -4758,7 +4820,7 @@ function seatsLabel(ds) {
   if (d.getDay() === 0 || d.getDay() === 6 || ds < isoDate(new Date()) || isBlackout(ds)) return '';
   const cap = getCapacityLimit(ds), count = getSessionsOnDate(ds), open = Math.max(0, cap - count);
   const cls = open === 0 ? 'cap-full' : open === 1 ? 'cap-near' : 'cap-open';
-  return `<span class="seats-label ${cls}" title="${count} of ${cap} booked">${open === 0 ? 'Full' : open + ' open'}</span>`;
+  return `<span class="seats-label ${cls}" title="${count} of ${cap} booked">${open === 0 ? 'Full' : `${open} slot${open === 1 ? '' : 's'} open`}</span>`;
 }
 const _origRenderWeek = renderWeek;
 renderWeek = function() {
