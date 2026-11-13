@@ -6105,7 +6105,7 @@ function buildAttentionItems() {
   const nameFor = x => x['Student Name'] || x['Student Email'] || 'Unknown student';
   const studentFor = x => studentDirectory.find(st => st.id === x['Student ID (Airtable)'])
     || studentDirectory.find(st => splitEmailsClient(st['Email']).includes((x['Student Email'] || '').toLowerCase())) || {};
-  const releasedGroups = {};
+  const releasedGroups = {}, waitingGroups = {};
   (allSessions || []).forEach(x => {
     if (isTestName(x['Student Name'])) return;
     const st = x['Approval Status'] || 'Pending', d = x['Session Date'] || '';
@@ -6113,17 +6113,28 @@ function buildAttentionItems() {
       const sub = (x.createdTime || '').slice(0, 10);
       const wait = sub ? businessDaysBetween(sub, today) : 0;
       if (wait > 2) {
-        const stu = studentFor(x);
-        items.push({ kind: 'Waiting on approval', name: nameFor(x),
-          text: `${formatDate(d)}, ${x['Start Time'] || '?'}–${x['End Time'] || '?'} (${x['Hours This Session'] ?? '?'} hrs) — requested ${formatDate(sub)}, ${wait} business days ago`,
-          open: stu.id ? `openStudentModalById('${stu.id}')` : '', sort: sub,
-          action: `<div style="display:flex;gap:6px;margin-top:6px"><button class="btn btn-success btn-sm" style="padding:3px 10px;font-size:11px" onclick="event.stopPropagation();quickSessionStatus('${x.id}','Approved',this)">✓ Approve</button><button class="btn btn-sm" style="padding:3px 10px;font-size:11px" onclick="event.stopPropagation();quickSessionStatus('${x.id}','Denied',this)">✕ Deny</button></div>` });
+        const key = x['Student ID (Airtable)'] || (x['Student Email'] || '').toLowerCase() || nameFor(x);
+        (waitingGroups[key] = waitingGroups[key] || { x, list: [] }).list.push({ s: x, sub, wait });
       }
     }
     if (['Pending', 'Approved'].includes(st) && d >= today) {
       const rot = rotationById[(x['Rotation'] || [])[0]];
       if (rot && rot['Seat Status'] === 'Released') (releasedGroups[rot.id] = releasedGroups[rot.id] || { rot, list: [], x }).list.push(x);
     }
+  });
+  Object.values(waitingGroups).forEach(({ x, list }) => {
+    const stu = studentFor(x);
+    list.sort((a, b) => (a.s['Session Date'] || '').localeCompare(b.s['Session Date'] || ''));
+    const oldest = list.reduce((m, o) => (o.sub < m.sub ? o : m), list[0]);
+    const hrs = Math.round(list.reduce((t, o) => t + (Number(o.s['Hours This Session']) || 0), 0) * 10) / 10;
+    const first = list[0].s['Session Date'], last = list[list.length - 1].s['Session Date'];
+    const ids = list.map(o => o.s.id).join(',');
+    items.push({ kind: 'Waiting on approval', name: nameFor(x),
+      text: list.length === 1
+        ? `${formatDate(first)}, ${list[0].s['Start Time'] || '?'}–${list[0].s['End Time'] || '?'} (${hrs} hrs) — waiting since ${formatDate(oldest.sub)} (${oldest.wait} business days)`
+        : `${list.length} sessions (${hrs} hrs), ${formatDate(first)} – ${formatDate(last)} — waiting since ${formatDate(oldest.sub)} (${oldest.wait} business days)`,
+      open: stu.id ? `openStudentModalById('${stu.id}')` : '', sort: oldest.sub,
+      action: `<div style="display:flex;gap:6px;margin-top:6px;flex-wrap:wrap"><button class="btn btn-success btn-sm" style="padding:3px 10px;font-size:11px" onclick="event.stopPropagation();quickSessionStatus('${ids}','Approved',this)">✓ Approve${list.length > 1 ? ' all ' + list.length : ''}</button><button class="btn btn-sm" style="padding:3px 10px;font-size:11px" onclick="event.stopPropagation();quickSessionStatus('${ids}','Denied',this)">✕ Deny${list.length > 1 ? ' all' : ''}</button>${stu.id ? `<button class="btn btn-sm" style="padding:3px 10px;font-size:11px" onclick="event.stopPropagation();${`openStudentModalById('${stu.id}')`}">Review one by one</button>` : ''}</div>` });
   });
   Object.values(releasedGroups).forEach(({ rot, list, x }) => {
     const stu = studentFor(x);
@@ -6152,15 +6163,22 @@ function businessDaysBetween(a, b) {
   return n;
 }
 // Quiet approve/deny from Needs attention — no email, no name prompt.
-async function quickSessionStatus(id, status, btn) {
-  if (status === 'Denied' && !confirm('Deny this session request? No email is sent; the student sees "Not approved" in their portal.')) return;
+async function quickSessionStatus(idList, status, btn) {
+  const ids = String(idList).split(',').filter(Boolean), n = ids.length;
+  const what = n === 1 ? 'this session request' : `all ${n} session requests`;
+  if (n > 1 && status === 'Approved' && !confirm(`Approve ${what}? No email is sent; each shows "Cleared to show up" in the student's portal.`)) return;
+  if (status === 'Denied' && !confirm(`Deny ${what}? No email is sent; the student sees "Not approved" in their portal.`)) return;
+  const label = btn ? btn.textContent : '';
   if (btn) { btn.disabled = true; btn.textContent = '…'; }
   const today = isoDate(new Date());
   const fields = status === 'Approved' ? { 'Approval Status': 'Approved', 'Approved By': 'Coordinator', 'Approved Date': today } : { 'Approval Status': 'Denied' };
-  const res = await airtableRequest('PATCH', `/${id}`, { fields });
-  if (!res) { showEmailToast('Could not update the session.', 'warn'); if (btn) { btn.disabled = false; btn.textContent = status === 'Approved' ? '✓ Approve' : '✕ Deny'; } return; }
-  const s = allSessions.find(x => x.id === id); if (s) Object.assign(s, fields);
-  showEmailToast(`Session ${status === 'Approved' ? 'approved' : 'denied'}.`, 'ok');
+  for (let i = 0; i < n; i += 10) {
+    const chunk = ids.slice(i, i + 10);
+    const res = await airtableRequest('PATCH', '', { records: chunk.map(id => ({ id, fields })) });
+    if (!res) { showEmailToast('Stopped partway — refresh and check which sessions were updated.', 'warn'); if (btn) { btn.disabled = false; btn.textContent = label; } renderAttention(); return; }
+    chunk.forEach(id => { const s = allSessions.find(x => x.id === id); if (s) Object.assign(s, fields); });
+  }
+  showEmailToast(`${n} session${n === 1 ? '' : 's'} ${status === 'Approved' ? 'approved' : 'denied'}.`, 'ok');
   renderAttention(); renderCalendar();
 }
 async function cancelReleasedSessions(idList, btn) {
