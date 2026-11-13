@@ -3046,7 +3046,7 @@ function renderStudentOpenDates() {
   const oc = document.getElementById('sess-view-open-count'); if (oc) oc.textContent = list.length;
   const multi = rots.length > 1;
   const shown = _openDatesShowAll ? list : list.slice(0, 10);
-  el.innerHTML = `<div class="card" style="padding:14px 16px">
+  el.innerHTML = rots.map(r => schedulingPlanCard(r, list.filter(o => o.rotId === r.id).length, multi)).join('') + `<div class="card" style="padding:14px 16px">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px">
       <span style="font-weight:700;font-size:14px">📅 Available dates you can request</span>
       <span style="font-size:12px;color:var(--text-muted)">${list.length} available day${list.length === 1 ? '' : 's'} · Mon–Thu 8 AM–5 PM, Fri 10 AM–3 PM</span>
@@ -3059,6 +3059,28 @@ function renderStudentOpenDates() {
       </div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">No available dates left in your rotation window. Message your coordinator if you need help finding time.</div>'}
     ${list.length > 10 ? `<div style="margin-top:8px"><a href="javascript:void(0)" onclick="_openDatesShowAll=!_openDatesShowAll;renderStudentOpenDates()" style="font-size:13px;color:var(--blue-dark);font-weight:600">${_openDatesShowAll ? 'Show fewer' : `Show all ${list.length} available days`}</a></div>` : ''}
   </div>`;
+}
+// Scheduling aid only — an estimate at 8 hrs/day. Never limits what a student
+// can request (some students do 8.5–9 hr days).
+const PLAN_HOURS_PER_DAY = 8;
+function schedulingPlanCard(r, availDays, multi) {
+  if (typeof r['Hours Goal'] !== 'number') return '';
+  const h = computeRotationHours(r, window._studentTrackerSessions || []);
+  const fmt = n => (Math.round(n * 10) / 10).toString();
+  const left = Math.max(0, h.remaining);
+  const title = `🧮 Your scheduling plan${multi ? ' — ' + escapeHtml(r['Course Name'] || 'Rotation') : ''}`;
+  const box = (color, bg, body) => `<div class="card" style="padding:14px 16px;margin-bottom:12px;border-left:4px solid ${color};background:${bg}">
+    <div style="font-weight:700;font-size:14px;margin-bottom:6px">${title}</div>${body}</div>`;
+  const math = `<div style="font-size:12px;color:var(--text-muted);margin-top:4px">${fmt(h.goal)} goal − ${fmt(h.completed)} done − ${fmt(h.scheduled)} booked = ${fmt(left)} hrs left to book</div>`;
+  if (left <= 0) return box('var(--green)', 'var(--white)', `<div style="font-size:14px">✓ You've booked enough hours to reach your goal.</div>${math}`);
+  const days = Math.ceil(left / PLAN_HOURS_PER_DAY);
+  let color = 'var(--green)', note = `${availDays} available day${availDays === 1 ? '' : 's'} left in your rotation — plenty of room.`;
+  if (availDays < days) { color = 'var(--red)'; note = `Only ${availDays} available day${availDays === 1 ? '' : 's'} left for about ${days} days of hours. <a href="javascript:void(0)" onclick="setPortalTab('message', document.querySelectorAll('.portal-tab')[2])" style="color:var(--blue-dark);font-weight:600">Message your coordinator</a> for help.`; }
+  else if (availDays < days * 1.5) { color = 'var(--amber)'; note = `You need about ${days} days and ${availDays} are left — book soon.`; }
+  return box(color, 'var(--white)', `<div style="font-size:15px">You still need to schedule <strong>${fmt(left)} hours</strong> — about <strong>${days} more day${days === 1 ? '' : 's'}</strong> at ${PLAN_HOURS_PER_DAY} hrs per day.</div>
+    ${math}
+    <div style="font-size:13px;margin-top:6px">${note}</div>
+    <div style="font-size:12px;color:var(--text-muted);margin-top:4px">This is just an estimate to help you plan. Fridays are shorter (10 AM–3 PM, 5 hrs).</div>`);
 }
 function requestOpenDate(ds, rotId) {
   openStudentRequestModal(ds);
@@ -3500,6 +3522,7 @@ async function lookupStudent() {
   window._studentPortalSessions = trackerSessions;
   // Header numbers use the same Hours Tracker math as the rotation cards
   // (Completed = Prior Hours + Completed/past-Approved sessions).
+  window._studentTrackerSessions = trackerSessions;
   const currentHours = rotation ? computeRotationHours(rotation, trackerSessions) : null;
   const goalSet = !!(currentHours && currentHours.goal != null);
   const totalDone = currentHours ? currentHours.completed : 0;
