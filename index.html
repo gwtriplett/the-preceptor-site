@@ -155,6 +155,11 @@
   .howto-guide th { background:var(--gray-50); }
   .howto-guide code { background:var(--gray-50); padding:1px 4px; border-radius:4px; }
   .howto-guide a { color:var(--blue-dark); }
+  .sess-view-toggle { display:inline-flex; background:var(--gray-50); border:1px solid var(--gray-100); border-radius:8px; padding:3px; gap:3px; }
+  .sess-view-btn { border:0; background:transparent; padding:6px 12px; border-radius:6px; font:inherit; font-size:13px; font-weight:600; color:var(--text-muted); cursor:pointer; white-space:nowrap; }
+  .sess-view-btn.active { background:var(--white); color:var(--text); box-shadow:0 1px 3px rgba(0,0,0,.08); }
+  .sess-view-count { display:inline-block; min-width:18px; padding:0 5px; margin-left:3px; border-radius:9px; background:var(--gray-100); font-size:11px; }
+  .sess-view-count:empty { display:none; }
   .modal { background: var(--white); border-radius: var(--radius); padding: 24px; width: 560px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
   .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
   .modal-title { font-size: 16px; font-weight: 600; }
@@ -1006,11 +1011,14 @@
 
     <!-- TAB: SESSIONS -->
     <div id="ptab-sessions">
-      <div class="section-head" style="margin-bottom:14px">
-        <span class="section-title">Your sessions</span>
+      <div class="section-head" style="margin-bottom:14px;flex-wrap:wrap;gap:8px">
+        <div class="sess-view-toggle">
+          <button class="sess-view-btn active" data-view="mine" onclick="setSessionsView('mine')">📋 My Sessions <span class="sess-view-count" id="sess-view-mine-count"></span></button>
+          <button class="sess-view-btn" data-view="open" onclick="setSessionsView('open')">📅 Available Dates <span class="sess-view-count" id="sess-view-open-count"></span></button>
+        </div>
         <button class="btn btn-primary btn-sm" onclick="openStudentRequestModal()">+ Request a session</button>
       </div>
-      <div id="student-open-dates" style="margin-bottom:16px"></div>
+      <div id="student-open-dates" style="display:none"></div>
       <div id="student-sessions-list"></div>
     </div>
 
@@ -3034,20 +3042,22 @@ function renderStudentOpenDates() {
   const rots = (window._studentPortalRotations || []).filter(isSchedulableRotation);
   if (!rots.length) { el.innerHTML = ''; return; }
   const list = studentOpenDates();
+  window._studentOpenCount = list.length;
+  const oc = document.getElementById('sess-view-open-count'); if (oc) oc.textContent = list.length;
   const multi = rots.length > 1;
   const shown = _openDatesShowAll ? list : list.slice(0, 10);
   el.innerHTML = `<div class="card" style="padding:14px 16px">
     <div style="display:flex;justify-content:space-between;align-items:baseline;gap:10px;flex-wrap:wrap;margin-bottom:8px">
-      <span style="font-weight:700;font-size:14px">📅 Open dates you can request</span>
-      <span style="font-size:12px;color:var(--text-muted)">${list.length} open day${list.length === 1 ? '' : 's'} · Mon–Thu 8 AM–5 PM, Fri 10 AM–3 PM</span>
+      <span style="font-weight:700;font-size:14px">📅 Available dates you can request</span>
+      <span style="font-size:12px;color:var(--text-muted)">${list.length} available day${list.length === 1 ? '' : 's'} · Mon–Thu 8 AM–5 PM, Fri 10 AM–3 PM</span>
     </div>
     ${list.length ? shown.map(o => `<div style="display:flex;align-items:center;gap:10px;padding:7px 0;border-top:1px solid var(--gray-50);font-size:13px">
         <div style="min-width:130px;font-weight:600">${new Date(o.ds + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })}</div>
         <span class="seats-label ${o.open === 1 ? 'cap-near' : 'cap-open'}">${o.open} slot${o.open === 1 ? '' : 's'} open</span>
         ${multi ? `<span style="color:var(--text-muted);font-size:12px">${escapeHtml(o.course)}</span>` : ''}
         <button class="btn btn-primary btn-sm" style="margin-left:auto" onclick="requestOpenDate('${o.ds}','${o.rotId}')">Request</button>
-      </div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">No open dates left in your rotation window. Message your coordinator if you need help finding time.</div>'}
-    ${list.length > 10 ? `<div style="margin-top:8px"><a href="javascript:void(0)" onclick="_openDatesShowAll=!_openDatesShowAll;renderStudentOpenDates()" style="font-size:13px;color:var(--blue-dark);font-weight:600">${_openDatesShowAll ? 'Show fewer' : `Show all ${list.length} open days`}</a></div>` : ''}
+      </div>`).join('') : '<div style="font-size:13px;color:var(--text-muted)">No available dates left in your rotation window. Message your coordinator if you need help finding time.</div>'}
+    ${list.length > 10 ? `<div style="margin-top:8px"><a href="javascript:void(0)" onclick="_openDatesShowAll=!_openDatesShowAll;renderStudentOpenDates()" style="font-size:13px;color:var(--blue-dark);font-weight:600">${_openDatesShowAll ? 'Show fewer' : `Show all ${list.length} available days`}</a></div>` : ''}
   </div>`;
 }
 function requestOpenDate(ds, rotId) {
@@ -3534,7 +3544,7 @@ async function lookupStudent() {
   setPortalTab('sessions', document.querySelector('.portal-tab'));
 
   const list = document.getElementById('student-sessions-list');
-  list.innerHTML = sessions.map(s => {
+  const sessionCard = s => {
     const status = s['Approval Status'] || 'Pending';
     const d = s['Session Date'] ? new Date(s['Session Date'] + 'T12:00:00') : null;
     const month = d ? d.toLocaleString('default', { month: 'short' }).toUpperCase() : '—';
@@ -3573,7 +3583,33 @@ async function lookupStudent() {
         ${statusBadge(status)}
       </div>
     </div>`;
-  }).join('');
+  };
+  // Upcoming = today or later and still on (Pending/Approved). Everything
+  // else (done, past, cancelled, denied) rolls up into a collapsed section.
+  const today = isoDate(new Date());
+  const isUpcoming = s => (s['Session Date'] || '') >= today && ['Pending', 'Approved'].includes(s['Approval Status'] || 'Pending');
+  const upcoming = sessions.filter(isUpcoming).sort((a, b) => (a['Session Date'] || '').localeCompare(b['Session Date'] || ''));
+  const past = sessions.filter(s => !isUpcoming(s)).sort((a, b) => (b['Session Date'] || '').localeCompare(a['Session Date'] || ''));
+  list.innerHTML = (upcoming.length ? upcoming.map(sessionCard).join('')
+      : `<div style="padding:18px;text-align:center;color:var(--text-muted);font-size:13px">No upcoming sessions. <a href="javascript:void(0)" onclick="setSessionsView('open')" style="color:var(--blue-dark);font-weight:600">See available dates →</a></div>`)
+    + (past.length ? `<details style="margin-top:12px"><summary style="cursor:pointer;font-size:13px;font-weight:600;color:var(--text-muted)">Past &amp; cancelled sessions (${past.length})</summary><div style="margin-top:10px">${past.map(sessionCard).join('')}</div></details>` : '');
+  window._studentUpcomingCount = upcoming.length;
+  if (!_sessionsViewChosen) _sessionsView = upcoming.length ? 'mine' : 'open';
+  setSessionsView(_sessionsView, true);
+}
+
+// My Sessions tab has two views: the student's own schedule, and open dates to request.
+let _sessionsView = 'mine', _sessionsViewChosen = false;
+function setSessionsView(view, auto) {
+  _sessionsView = view;
+  if (!auto) _sessionsViewChosen = true;
+  const mine = document.getElementById('student-sessions-list'), open = document.getElementById('student-open-dates');
+  if (mine) mine.style.display = view === 'mine' ? 'block' : 'none';
+  if (open) open.style.display = view === 'open' ? 'block' : 'none';
+  document.querySelectorAll('.sess-view-btn').forEach(b => b.classList.toggle('active', b.dataset.view === view));
+  const mc = document.getElementById('sess-view-mine-count'), oc = document.getElementById('sess-view-open-count');
+  if (mc) mc.textContent = window._studentUpcomingCount ?? '';
+  if (oc) oc.textContent = window._studentOpenCount ?? '';
 }
 
 
