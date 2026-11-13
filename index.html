@@ -144,6 +144,17 @@
   /* MODAL */
   .modal-backdrop { display: none; position: fixed; inset: 0; background: rgba(0,0,0,0.4); z-index: 200; align-items: center; justify-content: center; }
   .modal-backdrop.open { display: flex; }
+  .howto-guide { font-size:14px; line-height:1.6; color:var(--text-body); }
+  .howto-guide h3 { font-size:16px; margin:22px 0 8px; color:var(--text); }
+  .howto-guide h4 { font-size:14px; margin:14px 0 6px; color:var(--text); }
+  .howto-guide p, .howto-guide ul, .howto-guide ol { margin:0 0 10px; }
+  .howto-guide ul, .howto-guide ol { padding-left:22px; }
+  .howto-guide li { margin-bottom:4px; }
+  .howto-guide table { width:100%; border-collapse:collapse; margin:8px 0 12px; font-size:13px; }
+  .howto-guide th, .howto-guide td { border:1px solid var(--gray-100); padding:6px 8px; text-align:left; vertical-align:top; }
+  .howto-guide th { background:var(--gray-50); }
+  .howto-guide code { background:var(--gray-50); padding:1px 4px; border-radius:4px; }
+  .howto-guide a { color:var(--blue-dark); }
   .modal { background: var(--white); border-radius: var(--radius); padding: 24px; width: 560px; max-width: 95vw; max-height: 90vh; overflow-y: auto; }
   .modal-head { display: flex; align-items: center; justify-content: space-between; margin-bottom: 20px; }
   .modal-title { font-size: 16px; font-weight: 600; }
@@ -507,6 +518,7 @@
       <button class="login-btn" onclick="attemptStudentLogin()">Access My Sessions</button>
       <div class="login-error" id="student-login-error"></div>
       <div class="login-footer">Use the email or Student ID from your intake confirmation.</div>
+      <div class="login-footer" style="margin-top:6px">First time here? <a href="javascript:void(0)" onclick="openModal('howto-modal')" style="color:var(--blue-dark);font-weight:600">Read how the scheduler works →</a></div>
     </div>
   </div>
 </div>
@@ -643,6 +655,67 @@
 </div>
 
 <!-- REQUEST SESSION MODAL -->
+<div class="modal-backdrop" id="howto-modal" style="z-index:10000">
+  <div class="modal" style="width:720px">
+    <div class="modal-head">
+      <span class="modal-title">How to use the scheduler</span>
+      <button class="modal-close" onclick="closeModal('howto-modal')">✕</button>
+    </div>
+    <!-- Source: docs/scheduler-how-to.md — update both together. -->
+    <div class="howto-guide" id="howto-guide">
+<p>Welcome! This guide walks you through the online scheduler at <strong>sked.thepreceptorsite.com</strong>: how to log in, request your clinical hours, read your session statuses, cancel, and check your progress.</p>
+<p>A few things to know up front:</p>
+<ul><li><strong>The scheduler is the only official way to schedule your clinical hours.</strong> Requests made by text, phone, or in person aren't official.</li><li><strong>Scheduling is your job.</strong> You're responsible for entering and submitting your own hour requests.</li><li>You'll sign the Clinical Hours Policy <strong>once for each rotation</strong>, even if you've rotated with us before.</li><li>If this guide and your signed Preceptorship Agreement ever disagree, <strong>the Preceptorship Agreement wins</strong>.</li></ul>
+<h3>1. Before you start</h3>
+<p>You'll get scheduler access <strong>after your rotation's preceptor fee is paid in full</strong>. Until payment is confirmed, you won't be able to request hours. (Payment is non-refundable, per the Preceptorship Agreement.)</p>
+<h3>2. Logging in</h3>
+<ol><li>Go to <strong>sked.thepreceptorsite.com</strong>.</li><li>On the sign-in screen, click <strong>Student</strong>.</li><li>In the <strong>Email address or Student ID</strong> box, type the email address or Student ID The Preceptor Site gave you. Student IDs look like <code>26-2123</code>, and you'll find yours in your intake confirmation.</li><li>Click <strong>Access My Sessions</strong>.</li></ol>
+<p><strong>Can't get in?</strong> Email <strong><a href="mailto:coordinator@thepreceptorsite.com">coordinator@thepreceptorsite.com</a></strong> with your full name and your university/program.</p>
+<h3>3. Finding your way around</h3>
+<p>Once you're in, you'll see:</p>
+<ul><li><strong>Your hours at the top:</strong> hours completed, hours remaining, and a progress bar (more on this in section 7).</li><li><strong>Your rotation cards:</strong> one card per rotation, each with its own hours tracker.</li><li><strong>Tabs:</strong><ul><li><strong>My Sessions:</strong> every session you've requested and its status. This is where you request and cancel sessions.</li><li><strong>Update Info:</strong> ask for a change to your phone, address, or school supervisor.</li><li><strong>Message Coordinator:</strong> send a message to your coordinator and see their replies.</li><li><strong>My Availability:</strong> let us know about dates you're not available.</li><li><strong>Clinical Rotations:</strong> your rotations and their details.</li><li><strong>Scheduling Policies:</strong> the scheduling rules.</li></ul></li></ul>
+<h3>4. Requesting hours</h3>
+<ol><li>Go to the <strong>My Sessions</strong> tab and click <strong>+ Request a session</strong>.</li><li>Pick <strong>which rotation</strong> the dates are for.</li><li>Enter the <strong>Requested Date</strong>, your <strong>Arrival Time</strong> and <strong>Departure Time</strong>, and the <strong>Estimated Hours</strong>.</li><li>Add your <strong>Clinical Focus / What you hope to work on</strong>, plus any <strong>Notes for Preceptor</strong> (optional).</li><li>Requesting several days? Click <strong>+ Add another date for this student</strong> and add each one, so you can submit them all together.</li><li>Click <strong>Submit</strong>.</li></ol>
+<p>Your info is filled in from your student profile. If something's wrong, use <strong>Update Info</strong> or message your coordinator.</p>
+<h4>Good to know when you request</h4>
+<ul><li><strong>First come, first served.</strong> Submitting a request doesn't lock in the slot. It still has to be <strong>Approved</strong>.</li><li><strong>Request early</strong> for the best chance at the dates you want.</li><li>What's available depends on preceptor availability, clinic holidays and closures, clinic business hours, and staffing.</li><li><strong>Daily limit:</strong> up to <strong>8–8.5 hours per day</strong>.</li><li><strong>You can't schedule more total hours than you purchased</strong> for your rotation.</li><li><strong>Plan for full days.</strong> A full day is expected. If you'll finish fewer than 8 hours (arriving late or leaving early), get your <strong>preceptor's approval in advance</strong>, or the partial day may not count.</li></ul>
+<p><strong>Clinic hours:</strong> Monday–Thursday 8:00 AM–5:00 PM (8-hour days) and Friday 10:00 AM–3:00 PM (5-hour day).</p>
+<h3>5. Reading your session statuses</h3>
+<p>Each session in <strong>My Sessions</strong> shows a status:</p>
+<table><thead><tr><th>Status</th><th>What it means</th><th>What you see in the portal</th></tr></thead><tbody><tr><td><strong>Pending</strong></td><td>You sent the request. Nothing is confirmed yet. It's waiting on preceptor and/or coordinator review.</td><td>🟡 <em>Awaiting approval</em></td></tr><tr><td><strong>Approved</strong></td><td>Your preceptor and coordinator confirmed the date and time. You're expected to attend.</td><td>🟢 <em>Cleared to show up</em></td></tr><tr><td><strong>Denied</strong></td><td>The request wasn't granted (for example, the preceptor isn't available, the schedule is full, or there's a policy issue). Request a different slot.</td><td>🔴 <em>Not approved — contact coordinator</em></td></tr><tr><td><strong>Completed</strong></td><td>The session happened, and your hours were logged and confirmed. These hours count toward your rotation total.</td><td>Completed</td></tr><tr><td><strong>Cancelled</strong></td><td>An Approved session won't happen. You, your preceptor, or The Preceptor Site cancelled it. No hours are earned unless it's rescheduled and completed.</td><td>Cancelled</td></tr></tbody></table>
+<h4>How long does approval take?</h4>
+<p>Your coordinator responds to <strong>Pending</strong> requests within <strong>2 business days</strong>. If you haven't heard back after 2 business days, follow up. <strong>No reply doesn't mean no.</strong> It isn't a denial.</p>
+<h3>6. Cancelling a session</h3>
+<p>Life happens. Here's how to cancel the right way.</p>
+<p><strong>Every cancellation needs written notice.</strong> You can give it either way:</p>
+<ul><li><strong>In the scheduler:</strong> go to <strong>My Sessions</strong>, find the Pending or Approved session, and click <strong>Request cancellation</strong>. It changes to <em>⏳ Cancellation requested — waiting for your coordinator.</em></li><li><strong>By email:</strong> write to your coordinator at <strong><a href="mailto:coordinator@thepreceptorsite.com">coordinator@thepreceptorsite.com</a></strong>.</li></ul>
+<p><strong>At least 48 hours before the session:</strong> send your written notice at least 48 hours ahead.</p>
+<p><strong>Less than 48 hours before the session:</strong> send your written notice <strong>and</strong> tell your preceptor directly, as soon as you can.</p>
+<p><strong>Don't assume the session is cancelled until your coordinator confirms.</strong></p>
+<h4>Please keep in mind</h4>
+<ul><li><strong>Repeated late cancellations</strong> may be reviewed as an integrity or professionalism concern.</li><li><strong>No-show (no notice at all):</strong> you get no hours credit, and future dates may be denied or cancelled.</li><li><strong>Two no-shows in one rotation:</strong> your university/program is automatically notified.</li></ul>
+<h4>If we cancel on you</h4>
+<p>Sometimes an Approved session has to be cancelled for unforeseen reasons, like illness, an emergency, a clinic closure, or staffing. Your coordinator and/or preceptor will let you know ASAP and work with you to reschedule. <strong>These cancellations don't count against you.</strong></p>
+<h3>7. Checking your hours</h3>
+<p>At the top of your portal you'll see:</p>
+<ul><li><strong>Hours completed</strong></li><li><strong>Hours remaining</strong></li><li><strong>A progress bar</strong> showing how far you are toward your goal, plus how many hours are scheduled.</li></ul>
+<p>Each rotation card also has its own hours tracker.</p>
+<p><strong>Only Completed hours count</strong> toward your required rotation hours. Pending and Approved sessions are on the way, but they don't count until they're Completed.</p>
+<h4>Making up missed hours</h4>
+<p>You can make up missed hours up to <strong>1 business day after your rotation's official end date</strong>. After that, the rotation is closed.</p>
+<h4>Keep your own records</h4>
+<p>Your hours may be audited at any time by Preceptor Site staff, your preceptor, clinic staff, or your university/program. Audits may compare your logged hours to sign-in records, clinic schedules, and preceptor notes, so it's smart to keep your own records too.</p>
+<p><strong>Hours look wrong?</strong> Contact your coordinator or preceptor as soon as possible.</p>
+<h3>8. Integrity: the short version</h3>
+<ul><li><strong>Log only hours you actually worked.</strong> Logging hours you didn't work is falsification.</li><li><strong>Only request times you truly plan to attend.</strong></li><li><strong>Report conflicts, delays, or absences promptly</strong> (see section 6).</li><li><strong>Follow TMM Medical Group's dress code, badge, and confidentiality rules.</strong> These are in a separate policy and your Preceptorship Agreement.</li></ul>
+<p>Falsified hours, repeated no-shows, or other violations may lead to denied requests, ending the rotation without a refund, and/or notifying your university/program.</p>
+<h3>Need help?</h3>
+<ul><li><strong>Login trouble:</strong> email <strong><a href="mailto:coordinator@thepreceptorsite.com">coordinator@thepreceptorsite.com</a></strong> with your full name and university/program.</li><li><strong>Anything else:</strong> use the <strong>Message Coordinator</strong> tab in your portal, or email <strong><a href="mailto:coordinator@thepreceptorsite.com">coordinator@thepreceptorsite.com</a></strong>.</li></ul>
+<p>Welcome aboard, and good luck with your rotation! 🩺</p>
+    </div>
+    <div class="modal-footer"><button class="btn btn-primary" onclick="closeModal('howto-modal')">Got it</button></div>
+  </div>
+</div>
 <div class="modal-backdrop" id="request-modal">
   <div class="modal" style="width:640px;">
     <div class="modal-head">
@@ -878,6 +951,7 @@
       <button class="btn btn-primary" onclick="lookupStudent()">Find my portal</button>
       <button class="btn btn-primary btn-sm" onclick="openModal('request-modal')">+ Request a session</button>
     </div>
+    <div style="font-size:13px;margin-top:8px">First time here? <a href="javascript:void(0)" onclick="openModal('howto-modal')" style="color:var(--blue-dark);font-weight:600">Read how the scheduler works →</a></div>
   </div>
 
   <!-- STUDENT RESULTS -->
@@ -927,7 +1001,7 @@
       <div class="portal-tab" onclick="setPortalTab('message', this)">Message Coordinator</div>
       <div class="portal-tab" onclick="setPortalTab('availability', this)">My Availability</div>
       <div class="portal-tab" onclick="setPortalTab('rotations', this)">Clinical Rotations</div>
-      <div class="portal-tab" onclick="setPortalTab('policies', this)">Scheduling Policies</div>
+      <div class="portal-tab" onclick="setPortalTab('policies', this)">How It Works &amp; Policies</div>
     </div>
 
     <!-- TAB: SESSIONS -->
@@ -1044,20 +1118,13 @@
       </div>
     </div>
 
-    <!-- TAB: SCHEDULING POLICIES -->
+    <!-- TAB: HOW IT WORKS & POLICIES (content copied from #howto-guide on load) -->
     <div id="ptab-policies" style="display:none">
       <div class="card">
         <div class="section-head" style="margin-bottom:14px">
-          <span class="section-title">Scheduling policies</span>
+          <span class="section-title">How to use the scheduler</span>
         </div>
-        <div style="border:1px solid var(--gray-100);border-radius:8px;padding:20px;background:var(--gray-50);text-align:center">
-          <div style="font-size:15px;font-weight:600;color:var(--text-body);margin-bottom:8px">Coming Soon</div>
-          <div style="font-size:13px;color:var(--text-muted);line-height:1.6">
-            Written scheduling policies aren't posted here yet. In the meantime, please contact your preceptorship coordinator at
-            <a href="mailto:coordinator@thepreceptorsite.com" style="color:var(--blue-dark)">coordinator@thepreceptorsite.com</a>
-            for scheduling information.
-          </div>
-        </div>
+        <div class="howto-guide" id="ptab-policies-guide"></div>
       </div>
     </div>
 
@@ -1938,6 +2005,12 @@ function setTab(tab, el) {
 }
 
 // ── MODAL ─────────────────────────────────────────────
+document.addEventListener('DOMContentLoaded', () => {
+  const src = document.getElementById('howto-guide'), dst = document.getElementById('ptab-policies-guide');
+  if (src && dst) dst.innerHTML = src.innerHTML;
+  // The modal sits inside the app shell, which is hidden on the sign-in screen — move it to <body> so the sign-in link can open it.
+  const hm = document.getElementById('howto-modal'); if (hm) document.body.appendChild(hm);
+});
 function openModal(id) { document.getElementById(id).classList.add('open'); }
 function closeModal(id) { document.getElementById(id).classList.remove('open'); }
 
@@ -3777,7 +3850,7 @@ async function loadStudentMessageHistory() {
 
 // ── SESSION CANCELLATION ──────────────────────────────
 async function requestCancelSession(sessionId, sessionDate, sessionFocus, btn) {
-  if (!confirm(`Request to cancel your session on ${sessionDate}?\n\nYour coordinator will review the request. Do not assume the session is cancelled until you hear back.`)) return;
+  if (!confirm(`Request to cancel your session on ${sessionDate}?\n\nYour coordinator will review the request. Do not assume the session is cancelled until you hear back.\n\nLess than 48 hours away? Also tell your preceptor directly, as soon as you can.`)) return;
   if (btn) { btn.disabled = true; btn.textContent = 'Sending…'; }
   const ok = await submitCoordinatorMessage('Session cancellation request', `Requested cancellation of the session on ${sessionDate}${sessionFocus ? ` (Clinical Focus: ${sessionFocus})` : ''}.`, sessionId);
   if (!ok) {
