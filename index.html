@@ -365,6 +365,7 @@
   .rot-card-meta { color:var(--text-muted); margin-top:2px; }
   .rot-card-status { display:inline-block; margin-top:6px; font-size:10px; padding:1px 6px; border-radius:10px; background:var(--gray-100); color:var(--text-muted); }
   .rot-progress { height:4px; background:var(--gray-100); border-radius:2px; margin-top:7px; overflow:hidden; }
+  .rot-progress { display:flex; }
   .rot-progress > div { height:100%; background:var(--green); }
   .rot-flag { color:var(--red); font-weight:600; margin-top:5px; }
   .seats-label { font-size:10px; font-weight:600; padding:1px 6px; border-radius:10px; margin-left:6px; cursor:default; vertical-align:middle; }
@@ -4147,10 +4148,34 @@ const ROT_STAGES = [
   { key: 'closed',    label: 'Closed out',         statuses: ['✅ Completed'] },
   { key: 'dropped',   label: 'Withdrawn / terminated', statuses: ['Withdrawn/Cancelled', '🔴 Terminated'] },
 ];
+// Hours for a rotation, counted from sessions (not just signed-off hours):
+//   done   = prior hours + Completed sessions + Pending/Approved sessions before today
+//   booked = Pending/Approved sessions from today on
+// Older sessions aren't linked to a rotation, so those count when they're
+// the same student's and fall inside the rotation's dates.
 function rotationHours(r) {
   const goal = r['Hours Goal'] || 0;
-  const done = (r['Total Hours Signed Off'] || 0) + (r['Prior Hours Completed'] || 0);
-  return { goal, done, pct: goal ? Math.min(100, Math.round(done / goal * 100)) : 0 };
+  const today = isoDate(new Date());
+  const s = (window._studentMap || {})[(r['Student'] || [])[0]] || {};
+  const emails = splitEmailsClient(s['Email']);
+  const start = r['Requested Start Date'], end = r['Requested End Date'];
+  let done = r['Prior Hours Completed'] || 0, booked = 0;
+  (allSessions || []).forEach(x => {
+    const st = x['Approval Status'];
+    if (!['Pending', 'Approved', 'Completed'].includes(st)) return;
+    const linked = x['Rotation'] || [];
+    const d = x['Session Date'] || '';
+    const mine = linked.length ? linked.includes(r.id)
+      : ((s.id && x['Student ID (Airtable)'] === s.id) || emails.includes((x['Student Email'] || '').toLowerCase())) && start && end && d >= start && d <= end;
+    if (!mine) return;
+    const h = x['Hours This Session'] || 0;
+    if (st === 'Completed' || d < today) done += h; else booked += h;
+  });
+  const rd = n => Math.round(n * 10) / 10;
+  done = rd(done); booked = rd(booked);
+  return { goal, done, booked, planned: rd(done + booked),
+    pct: goal ? Math.min(100, Math.round(done / goal * 100)) : 0,
+    bookedPct: goal ? Math.max(0, Math.min(100, Math.round((done + booked) / goal * 100)) - Math.min(100, Math.round(done / goal * 100))) : 0 };
 }
 function rotationStage(r) {
   const st = r['Pipeline Status'] || '';
@@ -4229,7 +4254,7 @@ function renderRotationsBoard() {
           ${uni ? `<div class="rot-card-meta">${escapeHtml(uni)}</div>` : ''}
           ${course ? `<div class="rot-card-meta">${escapeHtml(course)}</div>` : ''}
           ${start ? `<div class="rot-card-meta">${formatDate(start)}${end ? ' – ' + formatDate(end) : ''}</div>` : ''}
-          ${h.goal ? `<div class="rot-progress" title="${h.done} of ${h.goal} hours"><div style="width:${h.pct}%"></div></div><div class="rot-card-meta">${h.done} / ${h.goal} hrs</div>` : ''}
+          ${h.goal ? `<div class="rot-progress" title="${h.done} done + ${h.booked} booked of ${h.goal} hours"><div style="width:${h.pct}%"></div><div style="width:${h.bookedPct}%;background:var(--blue);opacity:.35"></div></div><div class="rot-card-meta">${h.done} done${h.booked ? ` · ${h.booked} booked` : ''} / ${h.goal} hrs</div>` : ''}
           ${r['Pipeline Status'] ? `<span class="rot-card-status">${escapeHtml(r['Pipeline Status'])}</span>` : ''}
           ${(() => { const c = checklistStatus(r); return `<span class="rot-card-status" title="Checklist" style="margin-left:4px;${c.done === c.total ? 'background:var(--green-light);color:var(--green)' : ''}">☑ ${c.done}/${c.total}</span>`; })()}
           ${flags.map(f => `<div class="rot-flag">⚠ ${f}</div>`).join('')}
@@ -5788,27 +5813,10 @@ function buildAttentionItems() {
       const miss = checklistStatus(r).missingBeforeStart;
       if (miss.length) add('Starting soon', `Starts ${formatDate(start)} (${daysBetween(today, start)} days) — missing: ${miss.join(', ')}`, start);
     }
-    // Short on hours: prior hours + every Pending/Approved/Completed session
-    // for this rotation still won't reach the Hours Goal. Older sessions
-    // aren't linked to a rotation, so those count when they belong to the
-    // same student and fall inside the rotation's dates.
+    // Short on hours: done + booked still won't reach the Hours Goal.
     if (['ready', 'active'].includes(stage) && end && end >= today) {
-      const goal = r['Hours Goal'] || 0;
-      const sid = s.id, emails = splitEmailsClient(s['Email']);
-      const mine = allSessions.filter(x => {
-        if (!['Pending', 'Approved', 'Completed'].includes(x['Approval Status'])) return false;
-        const linked = x['Rotation'] || [];
-        if (linked.length) return linked.includes(r.id);
-        const d = x['Session Date'] || '';
-        const sameStudent = (sid && x['Student ID (Airtable)'] === sid) || emails.includes((x['Student Email'] || '').toLowerCase());
-        return sameStudent && start && d >= start && d <= end;
-      });
-      const doneOrPast = mine.filter(x => x['Approval Status'] === 'Completed' || (x['Session Date'] || '') < today).reduce((t, x) => t + (x['Hours This Session'] || 0), 0);
-      const upcoming = mine.filter(x => x['Approval Status'] !== 'Completed' && (x['Session Date'] || '') >= today).reduce((t, x) => t + (x['Hours This Session'] || 0), 0);
-      const prior = r['Prior Hours Completed'] || 0;
-      const rd = n => Math.round(n * 10) / 10;
-      const planned = rd(prior + doneOrPast + upcoming);
-      if (goal && planned < goal) add('Short on hours', `${rd(prior + doneOrPast)} done + ${rd(upcoming)} booked = ${planned} of ${goal} hrs — ${rd(goal - planned)} more needed by ${formatDate(end)}`, end);
+      const h = rotationHours(r);
+      if (h.goal && h.planned < h.goal) add('Short on hours', `${h.done} done + ${h.booked} booked = ${h.planned} of ${h.goal} hrs — ${Math.round((h.goal - h.planned) * 10) / 10} more needed by ${formatDate(end)}`, end);
     }
     // Ended but not closed out
     if (['active', 'hoursdone', 'ready'].includes(stage) && end && end < today) {
