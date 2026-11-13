@@ -4160,6 +4160,7 @@ function rotationHours(r) {
   const emails = splitEmailsClient(s['Email']);
   const start = r['Requested Start Date'], end = r['Requested End Date'];
   let done = r['Prior Hours Completed'] || 0, booked = 0;
+  const doneList = [];
   (allSessions || []).forEach(x => {
     const st = x['Approval Status'];
     if (!['Pending', 'Approved', 'Completed'].includes(st)) return;
@@ -4169,11 +4170,17 @@ function rotationHours(r) {
       : ((s.id && x['Student ID (Airtable)'] === s.id) || emails.includes((x['Student Email'] || '').toLowerCase())) && start && end && d >= start && d <= end;
     if (!mine) return;
     const h = x['Hours This Session'] || 0;
-    if (st === 'Completed' || d < today) done += h; else booked += h;
+    if (st === 'Completed' || d < today) { done += h; doneList.push([d, h]); } else booked += h;
   });
+  // Date the done hours first reached the goal (null if never, or met by prior hours alone).
+  let goalMetDate = null;
+  if (goal) {
+    let run = r['Prior Hours Completed'] || 0;
+    if (run < goal) for (const [d, h] of doneList.sort((a, b) => a[0].localeCompare(b[0]))) { run += h; if (run >= goal) { goalMetDate = d; break; } }
+  }
   const rd = n => Math.round(n * 10) / 10;
   done = rd(done); booked = rd(booked);
-  return { goal, done, booked, planned: rd(done + booked),
+  return { goal, done, booked, planned: rd(done + booked), goalMetDate,
     pct: goal ? Math.min(100, Math.round(done / goal * 100)) : 0,
     bookedPct: goal ? Math.max(0, Math.min(100, Math.round((done + booked) / goal * 100)) - Math.min(100, Math.round(done / goal * 100))) : 0 };
 }
@@ -5807,7 +5814,7 @@ function buildAttentionItems() {
     const s = studentOf(r), name = s['Student Name'] || '(no student)';
     const start = r['Requested Start Date'], end = r['Requested End Date'];
     const open = s.id ? `openStudentModalById('${s.id}','${r.id}')` : '';
-    const add = (kind, text, sort) => items.push({ kind, name, text, open, sort });
+    const add = (kind, text, sort, action) => items.push({ kind, name, text, open, sort, action });
     // Starting within 14 days with checklist items missing
     if (['requested', 'paperwork', 'ready'].includes(stage) && start && start >= today && daysBetween(today, start) <= 14) {
       const miss = checklistStatus(r).missingBeforeStart;
@@ -5816,7 +5823,14 @@ function buildAttentionItems() {
     // Short on hours: done + booked still won't reach the Hours Goal.
     if (['ready', 'active'].includes(stage) && end && end >= today) {
       const h = rotationHours(r);
-      if (h.goal && h.planned < h.goal) add('Short on hours', `${h.done} done + ${h.booked} booked = ${h.planned} of ${h.goal} hrs — ${Math.round((h.goal - h.planned) * 10) / 10} more needed by ${formatDate(end)}`, end);
+      if (h.goal && h.planned < h.goal) add('Short on hours', `${h.done} done + ${h.booked} booked = ${h.planned} of ${h.goal} hrs — ${Math.round((h.goal - h.planned) * 10) / 10} more needed by ${formatDate(end)}`, end,
+        splitEmailsClient(s['Email']).length ? `<button class="btn btn-secondary" style="margin-top:6px;padding:3px 10px;font-size:11px" onclick="event.stopPropagation();emailShortOnHours('${r.id}')">📧 Email student</button>` : '');
+    }
+    // Hours goal met 7+ days ago but rotation still open (and not yet past its end date)
+    if (stage === 'hoursdone' && !(end && end < today)) {
+      const met = rotationHours(r).goalMetDate;
+      const days = met ? daysBetween(met, today) : null;
+      if (days === null || days >= 7) add('Ready to close out', met ? `Hit hours goal ${formatDate(met)} (${days} days ago) — still "${r['Pipeline Status'] || 'no status'}"` : `Hours goal met — still "${r['Pipeline Status'] || 'no status'}"`, met || end);
     }
     // Ended but not closed out
     if (['active', 'hoursdone', 'ready'].includes(stage) && end && end < today) {
@@ -5843,7 +5857,7 @@ function buildAttentionItems() {
 }
 function splitEmailsClient(v) { return String(v || '').toLowerCase().split(/[\s,;]+/).filter(Boolean); }
 const ATTENTION_KINDS = [
-  ['Starting soon', 'var(--amber)'], ['Short on hours', 'var(--amber)'], ['Not closed out', 'var(--blue)'],
+  ['Starting soon', 'var(--amber)'], ['Short on hours', 'var(--amber)'], ['Not closed out', 'var(--blue)'], ['Ready to close out', 'var(--green)'],
   ['Unpaid balance', 'var(--red)'], ['Unanswered message', 'var(--blue)'],
 ];
 function renderAttention() {
@@ -5862,7 +5876,7 @@ function renderAttention() {
           <div style="font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.04em;color:${color};margin-bottom:6px">${kind} (${list.length})</div>
           ${list.map(i => `<div class="rot-card" style="margin-bottom:6px" ${i.open ? `onclick="${i.open}"` : ''}>
             <div class="rot-card-name">${escapeHtml(i.name)}</div>
-            <div class="rot-card-meta">${escapeHtml(i.text)}</div>
+            <div class="rot-card-meta">${escapeHtml(i.text)}</div>${i.action || ''}
           </div>`).join('')}
         </div>`;
       }).join('')}
@@ -5905,6 +5919,23 @@ async function logRotationActivity(type, text) {
   if (rotationById[r.id] && rotationById[r.id] !== r) rotationById[r.id]['Activity Log'] = next;
   renderRotationActivity();
   return true;
+}
+function emailShortOnHours(rotId) {
+  const r = allRotations.find(x => x.id === rotId);
+  if (!r) return;
+  const s = (window._studentMap || {})[(r['Student'] || [])[0]] || {};
+  const to = splitEmailsClient(s['Email'])[0];
+  if (!to) { showEmailToast('No email on file for this student.', 'warn'); return; }
+  const h = rotationHours(r);
+  const need = Math.round((h.goal - h.planned) * 10) / 10;
+  const first = (s['Student Name'] || '').split(' ')[0] || 'there';
+  const end = formatDate(r['Requested End Date']);
+  const subject = `Scheduling your remaining clinical hours`;
+  const body = `Hi ${first},\n\nQuick check-in on your rotation. You have ${h.done} hours completed and ${h.booked} hours booked, for ${h.planned} of your ${h.goal}-hour goal. That leaves ${need} more hours to schedule before your rotation ends on ${end}.\n\nPlease log in to the student portal and book your remaining sessions as soon as you can so we can hold spots for you.\n\nThank you!`;
+  window.open('https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(to) + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body), '_blank');
+  const prev = _currentRotation;
+  _currentRotation = r;
+  logRotationActivity('Email', `Short on hours reminder (${need} hrs needed) → ${to}`).finally(() => { _currentRotation = prev; });
 }
 async function addRotationNote() {
   const input = document.getElementById('sdm-note');
