@@ -3016,12 +3016,17 @@ function openStudentRequestModal(prefillDate) {
 // Counts are a guide; the server re-checks capacity when the request is sent.
 let _openDatesShowAll = false;
 function studentOpenDates() {
-  const rots = (window._studentPortalRotations || []).filter(isSchedulableRotation);
+  return availableDatesFor((window._studentPortalRotations || []).filter(isSchedulableRotation),
+    window._studentPortalRecordId, window._studentPortalEmail);
+}
+// Shared by the student portal and the coordinator's "Email available dates".
+function availableDatesFor(rots, studentId, emailField) {
+  const emails = splitEmailsClient(emailField);
   const tmr = new Date(); tmr.setDate(tmr.getDate() + 1);
   const from = isoDate(tmr);
   const mine = new Set((allSessions || []).filter(x => ['Pending', 'Approved', 'Completed'].includes(x['Approval Status'])
-    && (x['Student ID (Airtable)'] === window._studentPortalRecordId
-      || splitEmailsClient(window._studentPortalEmail).includes((x['Student Email'] || '').toLowerCase()))).map(x => x['Session Date']));
+    && ((studentId && x['Student ID (Airtable)'] === studentId)
+      || emails.includes((x['Student Email'] || '').toLowerCase()))).map(x => x['Session Date']));
   const out = [];
   rots.forEach(r => {
     const start = r['Requested Start Date'], end = r['Requested End Date'];
@@ -5631,7 +5636,10 @@ function renderSdmEmailButtons(student) {
             </button>`).join('')}
         </div>
       </div>`;
-  }).join('');
+  }).join('') + `<div>
+        <div style="font-size:11px;font-weight:600;color:var(--teal);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Scheduling</div>
+        <button onclick="emailAvailableDates()" style="padding:7px 13px;background:#fff;border:1.5px solid var(--teal);border-radius:20px;color:var(--teal);font-size:12px;cursor:pointer;font-family:inherit">📅 Email available dates</button>
+      </div>`;
 }
 
 function sendSdmEmail(group, idx) {
@@ -5945,6 +5953,7 @@ function renderMessagesList() {
           <button class="btn btn-primary btn-sm" onclick="saveMessageReply('${m.id}', true)">Save reply &amp; resolve</button>
           <button class="btn btn-sm" onclick="saveMessageReply('${m.id}', false)">Save reply</button>
           ${m['Student Email'] ? `<button class="btn btn-sm" onclick="emailMessageReply('${m.id}')">✉ Reply by email</button>` : ''}
+          ${(() => { const st = messageStudent(m); const rot = st && rotationsFor(st).find(isSchedulableRotation); return rot ? `<button class="btn btn-sm" onclick="emailAvailableDates('${rot.id}','${st.id}')">📅 Email available dates</button>` : ''; })()}
           ${s ? `<button class="btn btn-sm" onclick="openStudentModalById('${s.id}')">Open student</button>` : ''}
         </div>
       </div>
@@ -5969,6 +5978,35 @@ async function saveMessageReply(id, resolve) {
   if (resolve) fields['Status'] = 'Resolved';
   else { const m = allMessages.find(x => x.id === id); if (m && (m['Status'] || 'New') === 'New' && text) fields['Status'] = 'In Progress'; }
   if (await patchMessage(id, fields)) { showEmailToast(resolve ? '✓ Reply saved and resolved.' : '✓ Reply saved.', 'ok'); renderMessagesList(); }
+}
+// Coordinator: Gmail draft to a student listing their next available dates
+// (same list the student sees under Available Dates), logged on the rotation.
+function emailAvailableDates(rotId, studentId) {
+  const r = (rotId && (rotationById[rotId] || allRotations.find(x => x.id === rotId))) || _currentRotation;
+  if (!r) { showEmailToast('No rotation found for this student.', 'warn'); return; }
+  const sid = studentId || (r['Student'] || [])[0];
+  const s = studentDirectory.find(x => x.id === sid) || (window._studentMap || {})[sid] || {};
+  const to = splitEmailsClient(s['Email'])[0];
+  if (!to) { showEmailToast('No email on file for this student.', 'warn'); return; }
+  if (!isSchedulableRotation(r)) { showEmailToast(`This rotation is "${r['Pipeline Status'] || 'no status'}", so it isn't open for scheduling.`, 'warn'); return; }
+  const list = availableDatesFor([r], s.id, s['Email']);
+  const nm = (s['Student Name'] || '').trim();
+  const first = ((nm.includes(',') ? nm.split(',')[1] : nm).trim().split(/\s+/)[0] || 'there').replace(/[^\w'-]/g, '') || 'there';
+  const h = rotationHours(r);
+  const left = h.goal ? Math.max(0, Math.round((h.goal - h.planned) * 10) / 10) : null;
+  const MAX = 15;
+  const lines = list.slice(0, MAX).map(o => `  • ${new Date(o.ds + 'T12:00:00').toLocaleDateString('en-US', { weekday: 'short', month: 'short', day: 'numeric' })} — ${o.open} slot${o.open === 1 ? '' : 's'} open${o.dow === 5 ? ' (Fri, 10 AM–3 PM)' : ''}`);
+  const link = 'https://sked.thepreceptorsite.com/' + (s['Student ID'] ? '?sid=' + encodeURIComponent(s['Student ID']) : '');
+  const plan = left == null ? '' : left > 0
+    ? `You still have about ${left} hours to schedule — roughly ${Math.ceil(left / PLAN_HOURS_PER_DAY)} more days at 8 hours a day.\n\n`
+    : `You've already booked enough hours to reach your goal — these are here in case you need to add or move a day.\n\n`;
+  const body = `Hi ${first},\n\nThanks for reaching out! ${plan}` + (list.length
+    ? `Here are the next available dates in your rotation (${formatDate(r['Requested Start Date'])} – ${formatDate(r['Requested End Date'])}):\n\n${lines.join('\n')}${list.length > MAX ? `\n  …plus ${list.length - MAX} more` : ''}\n\nClinic hours are Monday–Thursday 8 AM–5 PM and Friday 10 AM–3 PM. Spots are first come, first served, so request soon. To request, sign in to the scheduler, open My Sessions → Available Dates, and click Request next to the date you want:\n${link}`
+    : `Right now there are no open dates left in your rotation window. Let's talk about options — just reply to this email.`)
+    + `\n\nWarm regards,\nThe Preceptor Site`;
+  window.open('https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(to) + '&su=' + encodeURIComponent('Available dates for your clinical hours') + '&body=' + encodeURIComponent(body), '_blank');
+  const prev = _currentRotation; _currentRotation = r;
+  logRotationActivity('Email', `Available dates (${list.length} open days) → ${to}`).finally(() => { _currentRotation = prev; });
 }
 function emailMessageReply(id) {
   const m = allMessages.find(x => x.id === id);
