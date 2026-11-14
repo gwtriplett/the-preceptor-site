@@ -6582,8 +6582,47 @@ function emailShortOnHours(rotId) {
   const nm = (s['Student Name'] || '').trim();
   const first = ((nm.includes(',') ? nm.split(',')[1] : nm).trim().split(/\s+/)[0] || 'there').replace(/[^\w'-]/g, '') || 'there';
   const end = formatDate(r['Requested End Date']);
-  const subject = `Scheduling your remaining clinical hours`;
-  const body = `Hi ${first},\n\nQuick check-in on your rotation. You have ${h.done} hours completed and ${h.booked} hours booked, for ${h.planned} of your ${h.goal}-hour goal. That leaves ${need} more hours to schedule before your rotation ends on ${end}.\n\nPlease log in to the student portal and book your remaining sessions as soon as you can so we can hold spots for you.\n\nThank you!`;
+  const sid = s['Student ID'] || '';
+  const link = 'https://thepreceptorsite.netlify.app/' + (sid ? '?sid=' + encodeURIComponent(sid) : '');
+  const subject = `Action Needed: Schedule Your Remaining Clinical Hours (${nm})`;
+  const body = `Hi ${first},
+
+Quick check-in on your rotation. You have ${h.done} hours completed and ${h.booked} hours booked, for ${h.planned} of your ${h.goal}-hour goal.
+
+That leaves ${need} more hours to schedule before your rotation ends on ${end}.
+
+
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+★
+★ REVIEW YOUR SCHEDULE & BOOK YOUR HOURS
+★
+★ 1. Open your scheduler portal:
+★    ${link}
+★
+★ 2. Click "Student" and sign in with your
+★    email${sid ? ` or Student ID (${sid})` : ''}. No password needed.
+★
+★ 3. Open My Sessions to review your current
+★    clinical schedule.
+★
+★ 4. Switch to Available Dates and click
+★    Request next to the days you want.
+★
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+
+Spots are first come, first served, so please book as soon as you can so we can hold them for you.
+
+
+Warm regards,
+
+Gerald
+Preceptorship Coordinator — The Preceptor Site
+coordinator@thepreceptorsite.com | (757) 977-9675
+www.thepreceptorsite.com
+3520 High Street, Suite 100 | Portsmouth, VA 23707
+
+Questions? Simply reply to this email and we will get back to you promptly.`;
   window.open('https://mail.google.com/mail/?view=cm&fs=1&to=' + encodeURIComponent(to) + '&su=' + encodeURIComponent(subject) + '&body=' + encodeURIComponent(body), '_blank');
   const prev = _currentRotation;
   _currentRotation = r;
