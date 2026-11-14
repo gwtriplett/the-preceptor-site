@@ -5206,35 +5206,75 @@ function buildEmailsSdm(s, paypalLink) {
   const payDate    = fmtDateSdm(s['Payment Received Date']) || '[Payment Date]';
   const paypal     = paypalLink || s['Paypal Invoice Link'] || '[INSERT PAYPAL INVOICE LINK]';
   const toEmail    = s['Email'] || '';
+  const phone      = s['Phone Number'] || '[Phone]';
+  const course     = s['Course Name'] || '[Course Name]';
+  const semester   = s['Semester / Quarter'] || '[Semester / Quarter]';
+  const nm         = s['Student Name'] ? ` (${s['Student Name']})` : '';
+  const responseDeadline = (() => {
+    const d = new Date(); let added = 0;
+    while (added < 5) { d.setDate(d.getDate() + 1); const w = d.getDay(); if (w !== 0 && w !== 6) added++; }
+    return d.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  })();
+  const daysToStart = (() => {
+    const raw = s['Requested Start Date'];
+    if (!raw) return null;
+    const d = new Date(String(raw).length <= 10 ? raw + 'T00:00:00' : raw);
+    if (isNaN(d)) return null;
+    const today = new Date(); today.setHours(0,0,0,0); d.setHours(0,0,0,0);
+    return Math.round((d - today) / 86400000);
+  })();
+  const startsIn = daysToStart == null || daysToStart < 0 ? null
+    : daysToStart === 0 ? 'today' : daysToStart === 1 ? 'tomorrow' : `in ${daysToStart} days`;
+  const portalLink = s['Student ID'] ? `https://thepreceptorsite.netlify.app/?sid=${encodeURIComponent(s['Student ID'])}` : 'https://thepreceptorsite.netlify.app/';
 
   const sig = `Warm regards,
+
 Gerald
 Preceptorship Coordinator — The Preceptor Site
+coordinator@thepreceptorsite.com | (757) 977-9675
+www.thepreceptorsite.com
 3520 High Street, Suite 100 | Portsmouth, VA 23707
+
 Questions? Simply reply to this email and we will get back to you promptly.`;
 
   const clinicInfo = `TMM Medical Group — The Preceptor Site
+
 3520 High Street, Suite 100 | Portsmouth, VA 23707
+
 Phone: (757) 977-9675 | Fax: (757) 483-8099
 
+Website: https://www.tmmmedicalgroup.com
+
+
 Clinic Hours:
+
 Monday – Thursday: 8:00 AM – 5:00 PM
+
 Friday: 10:00 AM – 3:00 PM
+
 Saturday – Sunday: Closed`;
 
   return [
     {
       label: '📧 1. Initial Outreach', group: 'Onboarding',
-      subject: 'Preceptorship Request — Next Steps | The Preceptor Site / TMM Medical Group',
+      subject: `Great News, We Can Precept You — Here Are the Next Steps${nm}`,
       body: `Hi ${firstName},
 
 My name is Gerald, and I serve as the Preceptorship Coordinator for The Preceptor Site, a division of TMM Medical Group. I am reaching out on behalf of Dr. Cooper, our lead preceptor, who oversees all clinical placements here at our practice.
 
-We do offer paid preceptorships, and I am happy to let you know that we can likely accommodate your requested dates. Here are a few things to know up front:
+We do offer paid preceptorships, and I am happy to let you know that we can likely accommodate your requested dates.
+
+
+A FEW THINGS TO KNOW UP FRONT
 
 - We charge $10 per clinical hour for our preceptorship program.
+
 - We have an affiliation agreement on file with most universities.
-- Dr. Cooper generally likes to meet with students beforehand — to introduce himself, walk you through our team and clinic, and confirm your specific dates before we finalize everything.
+
+- If this is your first time precepting at TMM Medical Group or with Dr. Cooper, we will set up a welcome meeting with Dr. Cooper and/or the TMM team once you are enrolled. It's a chance to meet the team, learn about the clinic, and go over expectations. If you have already met with Dr. Cooper or are a returning student, this step may not be needed.
+
+
+NEXT STEP
 
 If you are still interested in partnering with us, please take a moment to complete the form below so we can properly process your request:
 
@@ -5242,93 +5282,173 @@ https://thepreceptorsite.netlify.app/intake
 
 Once we receive your form, we will follow up with next steps, including your preceptorship agreement and invoice.
 
+
 Do not hesitate to reach out if you have any questions. We look forward to supporting you on your journey to becoming a Nurse Practitioner!
+
 
 ${sig}`, toEmail
     },
     {
       label: '📋 2. Post-Form Follow-Up', group: 'Onboarding',
-      subject: 'Your Preceptorship Request Has Been Received — Agreement & Invoice On the Way',
+      subject: `Intake Form Received — Agreement & Invoice On the Way${nm}`,
       body: `Hi ${firstName},
 
 Thank you for completing your intake form — we have received your information and are excited to move forward with your preceptorship here at The Preceptor Site at TMM Medical Group!
 
+
 ─────────────────────────────
+
+WHAT WE RECEIVED
+
+─────────────────────────────
+
+Student:          ${fullName}
+
+Email:            ${toEmail || '[Email]'}
+
+Phone:            ${phone}
+
+Program:          ${program}
+
+University:       ${university}
+
+Course:           ${course}
+
+Semester:         ${semester}
+
+Requested Start:  ${startDate}
+
+Requested End:    ${endDate}
+
+Hours Requested:  ${hours} hours
+
+─────────────────────────────
+
+If anything above is incorrect, simply reply to this email and we will update it.
+
+
+─────────────────────────────
+
 WHAT HAPPENS NEXT
+
 ─────────────────────────────
+
 
 1. AGREEMENT FOR REVIEW & SIGNATURE
 
 We will be sending you a Preceptorship Agreement via DocuSign shortly. Please review it carefully before signing. Key terms include:
 
-- Preceptorship fee: $10 per clinical hour, due in full before your start date.
-- 14-day written notice is required if you need to cancel or terminate.
-- Professional liability insurance is required: minimum $1,000,000 per occurrence / $6,000,000 aggregate.
-- Payment is non-refundable once the preceptorship begins.
+- Preceptorship fee: $10 per clinical hour, due in full by your start date.
+
+- Payment is non-refundable, including if the agreement is terminated.
+
+- 14-day written notice is required if you need to terminate the agreement.
+
+- Professional liability insurance is required: $1,000,000 per occurrence / $6,000,000 annual aggregate.
+
 
 2. INVOICE FOR PAYMENT
 
-An invoice will accompany your agreement reflecting the total number of hours requested and the corresponding fee. Payment must be received in full prior to your start date. Please note that all payments are non-refundable once submitted.
+An invoice will accompany your agreement reflecting the total number of hours requested and the corresponding fee. Payment must be received in full by your start date.
 
-3. INTRODUCTORY MEETING WITH DR. COOPER
 
-Dr. Cooper likes to personally connect with each student before the preceptorship begins. If you have not yet had a chance to speak with Dr. Cooper, please let me know and I will be happy to arrange that for you.
+3. WELCOME MEETING (FIRST-TIME STUDENTS)
+
+If this is your first time precepting at TMM Medical Group or with Dr. Cooper, we will connect you with Dr. Cooper and the TMM team for a welcome meeting once you are enrolled. If you have already met with Dr. Cooper or are a returning student, this step may not be needed.
+
 
 4. BEFORE YOU ARRIVE
 
 Prior to your first day, you will also need to provide the following:
 
 - Proof of professional liability insurance meeting our minimum requirements.
+
 - Documented proof of a current criminal background check.
+
 - Evidence of health immunity as required by TMM Medical Group policy.
+
 - Your written learning objectives for the preceptor experience.
+
 
 ─────────────────────────────
 
+
 Please do not hesitate to reach out at any time. We truly look forward to supporting your growth as a future Nurse Practitioner and welcoming you to our team!
+
 
 ${sig}`, toEmail
     },
     {
       label: '✍️ 3. Agreement Signed — Invoice', group: 'Onboarding',
-      subject: 'Agreement Received — One Step Remaining | The Preceptor Site',
+      subject: `Preceptor Agreement Received — One Step Remaining${nm}`,
       body: `Hi ${firstName},
 
 Great news — we have received your signed Preceptorship Agreement. Thank you for completing that step so promptly!
 
-You are almost ready to get started. There is just one remaining item before your preceptorship can be confirmed:
+You are almost ready to get started. There is just one remaining item before your preceptorship can be confirmed.
 
-Your invoice for ${hours} hours x $10/hour = ${billed} has been sent separately. Per the terms of your agreement, payment must be received in full before your preceptorship start date.
-
-You may submit your payment via the link below:
-${paypal}
 
 ─────────────────────────────
+
+YOUR INVOICE
+
+─────────────────────────────
+
+Your invoice for ${hours} hours x $10/hour = ${billed} has been sent separately. Per the terms of your agreement, payment is due in full by your start date and is non-refundable.
+
+
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+★
+★ PAY YOUR INVOICE HERE:
+★
+★ ${paypal}
+★
+★ Amount Due: ${billed}
+★
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+
+─────────────────────────────
+
 A QUICK RECAP OF YOUR PRECEPTORSHIP
+
 ─────────────────────────────
+
 Student:      ${fullName}
+
 Program:      ${program}
+
 University:   ${university}
+
 Start Date:   ${startDate}
+
 End Date:     ${endDate}
+
 Total Hours:  ${hours} hours
+
 Amount Due:   ${billed}
+
 ─────────────────────────────
+
 
 STILL NEED TO SUBMIT?
 
 If you have not yet provided the following pre-arrival documents, please do so as soon as possible:
 
-- Proof of professional liability insurance ($1M per occurrence / $6M aggregate minimum).
+- Proof of professional liability insurance ($1,000,000 per occurrence / $6,000,000 annual aggregate).
+
 - Documented criminal background check.
+
 - Evidence of health immunity as required by TMM Medical Group.
+
 - Your written learning objectives for the preceptor experience.
+
 
 ${sig}`, toEmail
     },
     {
       label: '✅ 4. Payment Confirmed — All Set!', group: 'Onboarding',
-      subject: "Payment Confirmed — You're All Set for Your Preceptorship! | The Preceptor Site",
+      subject: `Payment Confirmed — You're All Set!${nm}`,
       body: `Hi ${firstName},
 
 Wonderful news — your payment has been received and your preceptorship is now fully confirmed. We are thrilled to welcome you to The Preceptor Site at TMM Medical Group!
@@ -5337,173 +5457,400 @@ Payment Confirmed: ${billed} received on ${payDate}.
 
 If you require additional proof of payment for your records, please do not hesitate to reach out and I will be happy to provide that for you.
 
+
 ─────────────────────────────
+
 YOUR CONFIRMED PRECEPTORSHIP DETAILS
+
 ─────────────────────────────
+
 Student:      ${fullName}
+
 Program:      ${program}
+
 University:   ${university}
+
+Course:       ${course}
+
 Preceptor:    Dr. Cooper — TMM Medical Group
+
 Start Date:   ${startDate}
+
 End Date:     ${endDate}
+
 Total Hours:  ${hours} hours
+
 Location:     3520 High Street, Suite 100 — Portsmouth, VA 23707
-─────────────────────────────
-
-DAY ONE REMINDERS
-
-- Bring your photo ID badge and wear it visibly at all times while on-site.
-- Dress in accordance with TMM Medical Group's dress code policy.
-- Arrive on time for your scheduled shift and check in with the front desk.
-- If you have not yet submitted your insurance certificate, background check, or immunity documents, please do so before your start date.
-- Your written learning objectives should have been shared with Dr. Cooper ahead of your first day.
 
 ─────────────────────────────
+
+
+─────────────────────────────
+
+NEW TO TMM? LET'S SET UP A TIME TO CHAT
+
+─────────────────────────────
+
+If this is your first time precepting at TMM Medical Group or with Dr. Cooper, the next step is a welcome meeting with Dr. Cooper and the TMM Medical Group Staff. They will welcome you to the clinic and go over what to expect, including arrival, clinic policies, and dress code. TMM's dress code is business casual.
+
+Please reply to this email with a few days and times that work for you, and I will pass your availability along to the TMM team to schedule.
+
+If you have already met with Dr. Cooper or are a returning student, no action is needed.
+
+
+─────────────────────────────
+
 SCHEDULING YOUR DAYS
-─────────────────────────────
-
-Our default clinical hours for preceptorship are Monday through Friday. Monday through Thursday, the clinic is open 8:00 AM – 5:00 PM and you can expect to be scheduled for 8 clinical hours outside of your break time. On Fridays, the clinic is open 10:00 AM – 3:00 PM, earning you 5 clinical hours for the day.
-
-If you have any scheduling preferences, requests, or deviations from this schedule, please let me know in advance so I can coordinate with Dr. Cooper and the team onsite accordingly.
 
 ─────────────────────────────
+
+Our default clinical hours are Monday through Friday:
+
+- Monday – Thursday: 8:00 AM – 5:00 PM (8 clinical hours, not counting breaks)
+
+- Friday: 10:00 AM – 3:00 PM (5 clinical hours)
+
+You can request and track your clinical days in your scheduling portal:
+
+${portalLink}
+
+Log in by selecting "Student" and entering ${studentId !== '[YY-XXXX]' ? `your email address or Student ID (${studentId})` : 'your email address'}. No password is needed.
+
+If you have any scheduling preferences, requests, or changes, please let me know in advance through the portal or by email so I can coordinate with Dr. Cooper and the team onsite.
+
 
 This is an exciting milestone in your journey to becoming a Nurse Practitioner, and the entire team at TMM Medical Group is glad to be a part of it. If there is ever anything you need, please do not hesitate to reply.
+
 
 ${sig}`, toEmail
     },
     {
-      label: '🔄 5. Returning Student', group: 'Returning',
-      subject: "Welcome Back — Let's Get Your Next Rotation Scheduled | The Preceptor Site",
+      label: '🤝 5. Welcome Meeting — Handoff to TMM', group: 'Onboarding',
+      subject: `Meeting Request: New Precepting Student${nm}`,
+      body: `Hi Dr. Cooper and TMM Medical Group Staff,
+
+I'd like to introduce ${fullName}, who is fully enrolled and confirmed for a preceptorship at TMM Medical Group. ${firstName} is copied on this email.
+
+Please use the student's availability below to coordinate a welcome meeting with ${firstName} directly. This meeting is your chance to welcome ${firstName} to the clinic and go over expectations for the preceptorship.
+
+
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+★
+★ STUDENT AVAILABILITY FOR WELCOME MEETING
+★
+★ [ENTER STUDENT AVAILABILITY HERE]
+★
+★ Please reply all to confirm a time with ${firstName}.
+★
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+
+─────────────────────────────
+
+ROTATION DETAILS
+
+─────────────────────────────
+
+Student:      ${fullName}
+
+Email:        ${toEmail || '[Student Email]'}
+
+Program:      ${program}
+
+University:   ${university}
+
+Course:       ${course}
+
+Start Date:   ${startDate}
+
+End Date:     ${endDate}
+
+Total Hours:  ${hours} hours
+
+─────────────────────────────
+
+
+Hi ${firstName},
+
+Welcome! I've shared your availability with Dr. Cooper and the TMM Medical Group Staff. They will reach out to confirm a time for your welcome meeting. The TMM team will cover the details about the clinic and what to expect during your preceptorship.
+
+As a reminder, your rotation runs from ${startDate} to ${endDate}.
+
+
+─────────────────────────────
+
+WHO TO CONTACT
+
+─────────────────────────────
+
+CLINIC QUESTIONS (arrival, dress code, clinic policies, day-to-day on-site)
+
+→ TMM Medical Group
+   Dr. Cooper and TMM Medical Group Staff — kgalvez@tmmmedicalgroup.com
+   Phone: (757) 977-9675 | Fax: (757) 483-8099
+
+
+YOUR HOURS, SCHEDULE & ROTATION LOGISTICS
+
+→ Preceptorship Coordinator (Gerald)
+   Scheduling portal: ${portalLink}
+   Email: coordinator@thepreceptorsite.com
+
+─────────────────────────────
+
+
+YOUR SCHEDULING PORTAL LOGIN
+
+Go to ${portalLink}, select "Student," and log in with either:
+
+- Your email address: ${toEmail || '[Student Email]'}${studentId && studentId !== '[YY-XXXX]' ? `\n\n- Or your Student ID: ${studentId}` : ''}
+
+No password is needed.
+
+
+─────────────────────────────
+
+TMM MEDICAL GROUP
+
+─────────────────────────────
+
+3520 High Street, Suite 100 | Portsmouth, VA 23707
+
+Map & directions: https://share.google/uE0RWkl3jGeOZrvEc
+
+Phone: (757) 977-9675 | Fax: (757) 483-8099
+
+Website: https://www.tmmmedicalgroup.com
+
+
+Clinic Hours:
+
+Monday – Thursday: 8:00 AM – 5:00 PM
+
+Friday: 10:00 AM – 3:00 PM
+
+Saturday – Sunday: Closed
+
+─────────────────────────────
+
+
+We are excited to have you, ${firstName}!
+
+
+${sig}`,
+      toEmail: ['kgalvez@tmmmedicalgroup.com', 'jcooper@tmmmedicalgroup.com', toEmail].filter(Boolean).join(','),
+      cc: COORDINATOR_EMAIL
+    },
+    {
+      label: '🔄 6. Returning Student', group: 'Returning',
+      subject: `Welcome Back — Request Your Next Rotation${nm}`,
       body: `Hi ${firstName},
 
 Thank you so much for choosing to continue your clinical training with The Preceptor Site at TMM Medical Group — we truly appreciate your trust in us and are glad to have you back!
 
-To get your next rotation period set up, please reply with the following filled in:
 
-Full Name:
-University / Program:
-Rotation Start Date:
-Rotation End Date:
-Total Hours Needed:
-Specialty / Rotation Type:
-Schedule Restrictions:
+─────────────────────────────
 
-Or, if your school has not yet finalized your next rotation period, simply reply with your anticipated date range, approximate hours, and any scheduling preferences and we will hold your spot.
+REQUEST YOUR NEXT ROTATION IN THE PORTAL
 
-Once we hear back from you, same process as before — new DocuSign agreement, new invoice, then confirmation.
+─────────────────────────────
+
+Returning students request new rotations directly in the scheduling portal. Your new rotation will be added to your existing record, so all of your rotations and hours stay together in one place.
+
+
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+★
+★ 1. Go to: ${portalLink}
+★
+★ 2. Select "Student" and log in with your email${studentId !== '[YY-XXXX]' ? `\n★    or Student ID (${studentId})` : ''}. No password needed.
+★
+★ 3. Open the "Clinical Rotations" tab.
+★
+★ 4. Click "+ Request new rotation."
+★
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+
+Be ready to enter your:
+
+- Course name and semester / quarter
+
+- Requested start and end dates
+
+- Hours goal for the rotation
+
+If your school has not yet finalized your next rotation dates, simply reply to this email with your anticipated date range and approximate hours, and we will get your application started.
+
+
+─────────────────────────────
+
+WHAT HAPPENS NEXT
+
+─────────────────────────────
+
+Once we receive your request, it's the same process as before:
+
+1. New Preceptorship Agreement via DocuSign
+
+2. New invoice for your requested hours
+
+3. Confirmation, then scheduling your days in the portal
+
+Since you have already worked with Dr. Cooper and the TMM team, no welcome meeting is needed.
+
 
 ${sig}`, toEmail
     },
     {
-      label: '🚫 6. Deferral / Cancellation', group: 'Returning',
-      subject: "We've Noted Your Request — Wishing You the Best | The Preceptor Site",
+      label: '🚫 7. Deferral / Cancellation', group: 'Returning',
+      subject: `Your Request Has Been Noted — Wishing You the Best${nm}`,
       body: `Hi ${firstName},
 
 Thank you for reaching out to let us know. We completely understand that life, school schedules, and program requirements do not always go as planned, and we appreciate you taking the time to notify us.
 
 We have updated our records to reflect your [deferral / cancellation] and have noted the details of your original request below for reference.
 
+
 ─────────────────────────────
+
 YOUR ORIGINAL REQUEST ON FILE
+
 ─────────────────────────────
+
 Student:          ${fullName}
+
 University:       ${university}
+
 Program Type:     ${program}
+
+Course:           ${course}
+
 Requested Start:  ${startDate}
+
 Requested End:    ${endDate}
+
 Hours Requested:  ${hours} hours
+
 Student ID:       ${studentId}
-Status:           Deferred / Cancelled — [Date]
+
+Status:           [Deferred / Cancelled] — [Date]
+
 ─────────────────────────────
 
-As outlined in your Preceptorship Agreement, all payments made prior to the start of a preceptorship are non-refundable. If you have questions about your specific situation, please do not hesitate to reach out.
 
-Becoming a Nurse Practitioner is no small undertaking, and we have nothing but respect for the dedication and hard work it takes to get there. When the time is right, we would love to hear from you. Your information will remain on file.
+A NOTE ON PAYMENT
+
+As outlined in your Preceptorship Agreement, payment is non-refundable, including if the agreement is terminated. If you have questions about your specific situation, please do not hesitate to reach out.
+
+
+Becoming a Nurse Practitioner is no small undertaking, and we have nothing but respect for the dedication and hard work it takes to get there. When the time is right, we would love to hear from you. Your information will remain on file, and you can request a new rotation anytime through your scheduling portal:
+
+${portalLink}
+
 
 We wish you all the best on your journey, ${firstName}. Take good care, and please know our door is always open.
+
 
 ${sig}`, toEmail
     },
     {
-      label: '⏰ 7. Two Week Reminder', group: 'Reminders',
-      subject: 'Your Preceptorship Starts in 2 Weeks — A Few Reminders | The Preceptor Site',
+      label: '⏰ 8. Upcoming Preceptorship', group: 'Reminders',
+      subject: `${firstName}, Your Preceptorship Starts ${daysToStart > 1 ? `in ${daysToStart} Days` : daysToStart === 1 ? 'Tomorrow' : daysToStart === 0 ? 'Today' : 'Soon'}`,
       body: `Hi ${firstName},
 
-Just a friendly reminder that your preceptorship at The Preceptor Site at TMM Medical Group is coming up in two weeks, starting on ${startDate}. We are looking forward to having you!
+Your preceptorship at The Preceptor Site at TMM Medical Group is coming up — ${startsIn ? `you start ${startsIn}, on ${startDate}` : `you start on ${startDate}`}. We are looking forward to having you!
 
-Please make sure the following are in order before your first day:
 
-- Proof of professional liability insurance ($1M per occurrence / $6M aggregate minimum).
+─────────────────────────────
+
+BEFORE YOUR FIRST DAY
+
+─────────────────────────────
+
+Please make sure the following are in order:
+
+- Proof of professional liability insurance ($1,000,000 per occurrence / $6,000,000 annual aggregate).
+
 - Documented criminal background check.
+
 - Evidence of health immunity as required by TMM Medical Group.
+
 - Your written learning objectives for the preceptor experience.
 
 If you have already submitted these, you are all set!
 
+
 ─────────────────────────────
+
+SCHEDULE YOUR CLINICAL DAYS
+
+─────────────────────────────
+
+If you haven't already, please request your clinical days in your scheduling portal:
+
+${portalLink}
+
+Log in by selecting "Student" and entering ${studentId !== '[YY-XXXX]' ? `your email address or Student ID (${studentId})` : 'your email address'}.
+
+New to TMM? If you have not yet had your welcome meeting with Dr. Cooper and the TMM team, please reply to this email with your availability so we can get it scheduled.
+
+
+─────────────────────────────
+
 ${clinicInfo}
+
 ─────────────────────────────
+
 
 ${sig}`, toEmail
     },
     {
-      label: '⏰ 8. One Week Reminder', group: 'Reminders',
-      subject: 'One Week Until Your Preceptorship Begins | The Preceptor Site',
+      label: '⏰ 9. Starting Soon', group: 'Reminders',
+      subject: `${firstName}, Your Clinicals Are Starting Soon${daysToStart > 1 ? ` — ${daysToStart} Days to Go!` : daysToStart === 1 ? ' — Tomorrow!' : daysToStart === 0 ? ' — Today!' : '!'}`,
       body: `Hi ${firstName},
 
-Your preceptorship at The Preceptor Site at TMM Medical Group is just one week away — starting ${startDate}. We are excited to welcome you to the team!
+Your preceptorship at The Preceptor Site at TMM Medical Group is almost here — ${daysToStart > 1 ? `just ${daysToStart} days to go until you start on ${startDate}` : startsIn ? `you start ${startsIn}, ${startDate}` : `you start on ${startDate}`}. We can't wait to have you!
 
-Quick check-in before you start:
+
+─────────────────────────────
+
+FINAL CHECKLIST
+
+─────────────────────────────
 
 - All required documents submitted (insurance, background check, immunity records, learning objectives).
-- Any scheduling preferences or conflicts communicated to Gerald in advance.
-- Questions about your first day addressed before you arrive.
 
-If there is anything outstanding, please reply right away so we can get it sorted.
+- Your clinical days requested in your scheduling portal: ${portalLink}
+
+- Welcome meeting completed with Dr. Cooper and the TMM team (first-time students).
+
+If anything is outstanding, please reply right away so we can get it sorted.
+
 
 ─────────────────────────────
+
+YOUR FIRST DAY
+
+─────────────────────────────
+
+- Arrive on time and check in with the front desk.
+
+- Wear your photo ID badge visibly at all times while on-site.
+
+- TMM's dress code is business casual.
+
+- Clinical hours: Monday – Thursday 8:00 AM – 5:00 PM (8 hrs) · Friday 10:00 AM – 3:00 PM (5 hrs).
+
+
+─────────────────────────────
+
 ${clinicInfo}
+
 ─────────────────────────────
+
 
 See you soon!
 
-${sig}`, toEmail
-    },
-    {
-      label: '⏰ 9. Three Day Reminder', group: 'Reminders',
-      subject: "3 Days to Go — We'll See You Soon! | The Preceptor Site",
-      body: `Hi ${firstName},
-
-Your preceptorship at The Preceptor Site at TMM Medical Group kicks off in just 3 days on ${startDate} — we cannot wait to have you!
-
-Last-minute reminders:
-
-- Plan to arrive on time and check in with the front desk.
-- Wear your photo ID badge visibly at all times while on-site.
-- Dress in accordance with TMM Medical Group's dress code policy.
-- Clinical hours: Monday – Thursday 8:00 AM – 5:00 PM (8 hrs) · Fridays 10:00 AM – 3:00 PM (5 hrs).
-
-─────────────────────────────
-${clinicInfo}
-─────────────────────────────
-
-We are looking forward to seeing you on ${startDate}!
-
-${sig}`, toEmail
-    },
-    {
-      label: '👋 10. Nudge — No Application Yet', group: 'Nudges',
-      subject: "Still Interested? We'd Love to Have You | The Preceptor Site",
-      body: `Hi ${firstName},
-
-I wanted to follow up on your recent inquiry about our preceptorship program here at The Preceptor Site at TMM Medical Group. We noticed we have not yet received your application and wanted to make sure you had everything you need to get started.
-
-When you are ready, you can complete your intake form here:
-
-https://thepreceptorsite.netlify.app/intake
-
-If you have any questions, or if your plans have changed, please do not hesitate to let me know.
 
 ${sig}`, toEmail
     },
@@ -5513,13 +5860,88 @@ ${sig}`, toEmail
       return { label: '📊 Schedule Audit – Action Needed', group: 'Reminders', subject: e.subject, body: e.body, toEmail };
     })(),
     {
-      label: '✍️ 11. Nudge — Agreement Not Signed', group: 'Nudges',
-      subject: 'Your Preceptorship Agreement is Waiting — Action Needed | The Preceptor Site',
+      label: '✍️ 10. Nudge — Agreement Not Signed', group: 'Nudges',
+      subject: `${firstName}, Your Preceptor Agreement Is Waiting for Your Signature`,
       body: `Hi ${firstName},
 
-Just a friendly reminder that your Preceptorship Agreement has been sent via DocuSign and is still waiting for your signature. Please take a moment to review and sign at your earliest convenience.
+Just a friendly reminder that your Preceptorship Agreement was sent to you via DocuSign and is still waiting for your signature.
 
-Can't find the DocuSign email? Please check your spam or junk folder. You can also reply to this email and I will resend it right away.
+Your requested start date is ${startDate}. Your agreement must be signed, and payment received in full, before your preceptorship can be confirmed and your clinical days scheduled.
+
+
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+★
+★ ACTION NEEDED: SIGN YOUR AGREEMENT
+★
+★ Look for an email from DocuSign.
+★
+★ Can't find it? Check your spam or junk folder,
+★ or reply to this email and I will resend it
+★ right away.
+★
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+
+Once your signed agreement is received, I will send your invoice so we can lock in your dates.
+
+If your plans have changed, simply reply to this email and let me know.
+
+
+${sig}`, toEmail
+    },
+    {
+      label: '⚠️ 11. Final Notice — Cancel Request?', group: 'Nudges',
+      subject: `${firstName}, Should We Cancel Your Preceptorship Request?`,
+      body: `Hi ${firstName},
+
+I have reached out a few times about your Preceptorship Agreement for your upcoming clinical rotation, but I have not yet received a signed agreement or a response from you.
+
+We understand how challenging it can be to secure a local preceptorship, and we want to make sure you don't lose your spot. At the same time, our availability is limited, and other students are waiting for placement.
+
+
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+★
+★ PLEASE RESPOND BY ${responseDeadline.toUpperCase()}
+★
+★ If we do not receive your signed agreement or
+★ a reply by this date, your request for this
+★ clinical rotation will be cancelled and your
+★ spot will be released to another student.
+★
+★★★★★★★★★★★★★★★★★★★★★★★★★★★★★
+
+
+─────────────────────────────
+
+YOUR REQUEST ON FILE
+
+─────────────────────────────
+
+Course:           ${course}
+
+Requested Start:  ${startDate}
+
+Requested End:    ${endDate}
+
+Hours Requested:  ${hours} hours
+
+─────────────────────────────
+
+
+TO KEEP YOUR SPOT:
+
+- Sign your Preceptorship Agreement in DocuSign (check your spam or junk folder if you can't find it), or
+
+- Reply to this email and I will resend the agreement right away.
+
+
+IF YOUR PLANS HAVE CHANGED:
+
+Simply reply and let me know. I will close out your request so the spot can go to another student, and you are always welcome to reach out again in the future.
+
+
+We would love to have you at TMM Medical Group, ${firstName}, and hope to hear from you soon.
+
 
 ${sig}`, toEmail
     },
@@ -5564,6 +5986,7 @@ function sendSdmEmail(group, idx) {
   if (!email) return;
   const url = 'https://mail.google.com/mail/?view=cm&fs=1' +
     '&to=' + encodeURIComponent(email.toEmail || '') +
+    (email.cc ? '&cc=' + encodeURIComponent(email.cc) : '') +
     '&su=' + encodeURIComponent(email.subject) +
     '&body=' + encodeURIComponent(email.body);
   window.open(url, '_blank');
