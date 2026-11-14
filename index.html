@@ -4547,6 +4547,12 @@ async function renderRevenuePage() {
 // STUDENT PORTAL ACCESS
 // ══════════════════════════════════════════════════════════════
 const PORTAL_URL = 'https://sked.thepreceptorsite.com';
+// Opens the student's own portal in a new window (its own tab session, so the staff login here is untouched).
+function openStudentPortal(s) {
+  const key = (s && (s['Student ID'] || splitEmailsClient(s['Email'])[0])) || '';
+  if (!key) { showEmailToast('No Student ID or email on file for this student.', 'warn'); return; }
+  window.open('https://thepreceptorsite.netlify.app/?sid=' + encodeURIComponent(key), '_blank', 'noopener');
+}
 // One student at a time, from their record: opens a pre-filled Gmail draft.
 function emailPortalAccess(studentId) {
   const s = studentDirectory.find(x => x.id === studentId) || (window._studentMap || {})[studentId] || _currentStudent;
@@ -5974,6 +5980,7 @@ function renderSdmEmailButtons(student) {
         <div style="font-size:11px;font-weight:600;color:var(--teal);text-transform:uppercase;letter-spacing:0.5px;margin-bottom:6px;">Scheduling</div>
         <button onclick="emailAvailableDates()" style="padding:7px 13px;background:#fff;border:1.5px solid var(--teal);border-radius:20px;color:var(--teal);font-size:12px;cursor:pointer;font-family:inherit">📅 Email available dates</button>
         <button onclick="emailPortalAccess(_currentStudent && _currentStudent.id)" style="padding:7px 13px;background:#fff;border:1.5px solid var(--teal);border-radius:20px;color:var(--teal);font-size:12px;cursor:pointer;font-family:inherit">🔑 Email portal access</button>
+        <button onclick="openStudentPortal(_currentStudent)" style="padding:7px 13px;background:#fff;border:1.5px solid var(--teal);border-radius:20px;color:var(--teal);font-size:12px;cursor:pointer;font-family:inherit">🔗 Open student portal</button>
       </div>`;
 }
 
