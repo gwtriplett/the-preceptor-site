@@ -997,11 +997,16 @@
       <button class="btn btn-teal btn-sm" onclick="studentDownloadCert()">Download letter</button>
     </div>
 
+    <div id="s-reply-banner" style="display:none;margin-bottom:12px;padding:10px 14px;border-radius:8px;background:#FFF4E5;border:1px solid #F5C77E;font-size:13.5px;display:none;align-items:center;gap:10px;flex-wrap:wrap">
+      <span>💬 <strong id="s-reply-banner-text">You have a new reply from your coordinator.</strong></span>
+      <a href="javascript:void(0)" onclick="setPortalTab('message', document.querySelector('.portal-tab[onclick*=&quot;message&quot;]'))" style="margin-left:auto;color:var(--blue-dark);font-weight:700">View →</a>
+    </div>
+
     <!-- PORTAL TABS -->
     <div class="portal-tabs">
       <div class="portal-tab active" onclick="setPortalTab('sessions', this)">My Sessions</div>
       <div class="portal-tab" onclick="setPortalTab('contact', this)">Update Info</div>
-      <div class="portal-tab" onclick="setPortalTab('message', this)">Message Coordinator</div>
+      <div class="portal-tab" onclick="setPortalTab('message', this)">Message Coordinator <span id="s-msg-badge" class="msg-badge" style="display:none"></span></div>
       <div class="portal-tab" onclick="setPortalTab('availability', this)">My Availability</div>
       <div class="portal-tab" onclick="setPortalTab('rotations', this)">Clinical Rotations</div>
       <div class="portal-tab" onclick="setPortalTab('policies', this)">How It Works &amp; Policies</div>
@@ -3513,6 +3518,7 @@ async function lookupStudent() {
 
   // Store globals for student portal features
   window._studentPortalEmail = studentRecord['Email'] || val;
+  checkStudentReplies();
   window._studentPortalName = studentName;
   window._studentPortalId = studentRecord['Student ID'] || '';
   window._studentPortalUniversity = studentRecord['University / College'] || '';
@@ -3884,6 +3890,43 @@ Reply directly to the student at: ${window._studentPortalEmail}
 // first: submitted date, subject, message, status, coordinator notes and
 // the session it's about (cancellation requests).
 const COORD_MESSAGES_TABLE_ID = 'tbltq7GwNZaR4mmUY';
+async function fetchStudentMessages(email) {
+  let msgs = [], offset = '';
+  do {
+    const formula = encodeURIComponent(`LOWER({Student Email})="${email.replace(/"/g, '')}"`);
+    const data = await atRead(STUDENTS_BASE_ID, COORD_MESSAGES_TABLE_ID,
+      `?filterByFormula=${formula}&sort[0][field]=Submitted&sort[0][direction]=desc&pageSize=100${offset ? '&offset=' + offset : ''}`);
+    if (!data) throw new Error('Could not reach the server.');
+    msgs = msgs.concat((data.records || []).map(r => ({ id: r.id, createdTime: r.createdTime, ...r.fields })));
+    offset = data.offset || '';
+  } while (offset);
+  return msgs;
+}
+// New-reply alerts: a reply counts as read once the student opens the Message
+// Coordinator tab. Stored per browser; an edited reply shows as new again.
+function replyKey(m) { const s = String(m['Coordinator Notes'] || ''); let h = 0; for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0; return m.id + ':' + h; }
+function seenReplies() { try { return new Set(JSON.parse(localStorage.getItem('tps_seen_replies') || '[]')); } catch (e) { return new Set(); } }
+function unreadReplies(msgs) { const seen = seenReplies(); return msgs.filter(m => String(m['Coordinator Notes'] || '').trim() && !seen.has(replyKey(m))); }
+function markRepliesSeen(msgs) {
+  const seen = seenReplies();
+  msgs.forEach(m => { if (String(m['Coordinator Notes'] || '').trim()) seen.add(replyKey(m)); });
+  try { localStorage.setItem('tps_seen_replies', JSON.stringify([...seen].slice(-500))); } catch (e) {}
+  showReplyAlert(0);
+}
+function showReplyAlert(n) {
+  const b = document.getElementById('s-msg-badge'), ban = document.getElementById('s-reply-banner');
+  if (b) { b.textContent = n; b.style.display = n ? 'inline-block' : 'none'; }
+  if (ban) {
+    ban.style.display = n ? 'flex' : 'none';
+    const tx = document.getElementById('s-reply-banner-text');
+    if (tx) tx.textContent = n === 1 ? 'You have a new reply from your coordinator.' : `You have ${n} new replies from your coordinator.`;
+  }
+}
+async function checkStudentReplies() {
+  const email = (window._studentPortalEmail || '').toLowerCase();
+  if (!email) return showReplyAlert(0);
+  try { showReplyAlert(unreadReplies(await fetchStudentMessages(email)).length); } catch (e) { console.error(e); }
+}
 async function loadStudentMessageHistory() {
   const box = document.getElementById('msg-history');
   if (!box) return;
@@ -3891,16 +3934,9 @@ async function loadStudentMessageHistory() {
   if (!email) { box.textContent = 'Look yourself up to see your messages.'; return; }
   box.textContent = 'Loading…';
   try {
-    let msgs = [];
-    let offset = '';
-    do {
-      const formula = encodeURIComponent(`LOWER({Student Email})="${email.replace(/"/g, '')}"`);
-      const data = await atRead(STUDENTS_BASE_ID, COORD_MESSAGES_TABLE_ID,
-        `?filterByFormula=${formula}&sort[0][field]=Submitted&sort[0][direction]=desc&pageSize=100${offset ? '&offset=' + offset : ''}`);
-      if (!data) throw new Error('Could not reach the server.');
-      msgs = msgs.concat((data.records || []).map(r => ({ id: r.id, createdTime: r.createdTime, ...r.fields })));
-      offset = data.offset || '';
-    } while (offset);
+    const msgs = await fetchStudentMessages(email);
+    const unread = new Set(unreadReplies(msgs).map(m => m.id));
+    markRepliesSeen(msgs);
 
     if (!msgs.length) { box.innerHTML = '<div style="padding:8px 0">You haven\'t sent any messages yet.</div>'; return; }
 
@@ -3932,7 +3968,7 @@ async function loadStudentMessageHistory() {
           </div>
           ${sessions.length ? `<div style="font-size:11.5px;color:var(--text-muted);margin-top:2px">Session: ${esc(sessions.join(', '))}</div>` : ''}
           <div style="white-space:pre-wrap;margin-top:6px">${esc(m['Message'])}</div>
-          ${m['Coordinator Notes'] ? `<div style="white-space:pre-wrap;margin-top:8px;padding:8px 10px;background:var(--gray-50);border-radius:6px;font-size:12.5px"><span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase">Coordinator notes</span><br>${esc(m['Coordinator Notes'])}</div>` : ''}
+          ${m['Coordinator Notes'] ? `<div style="white-space:pre-wrap;margin-top:8px;padding:8px 10px;background:var(--gray-50);border-radius:6px;font-size:12.5px"><span style="font-size:11px;font-weight:600;color:var(--text-muted);text-transform:uppercase">Coordinator notes</span>${unread.has(m.id) ? ' <span class="msg-badge" style="margin-left:6px">New</span>' : ''}<br>${esc(m['Coordinator Notes'])}</div>` : ''}
         </div>`;
     }).join('');
   } catch (e) {
