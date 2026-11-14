@@ -32,7 +32,7 @@ You'll get scheduler access **after your rotation's preceptor fee is paid in ful
 
 Once you're in, you'll see:
 
-- **Your hours at the top:** hours completed, hours remaining, and a progress bar (more on this in section 7).
+- **Your hours at the top:** hours completed, hours unscheduled (still to book), and a progress bar (more on this in section 7).
 - **Your rotation cards:** one card per rotation, each with its own hours tracker.
 - **Tabs:**
   - **My Sessions:** every session you've requested and its status. This is where you request and cancel sessions.
@@ -118,7 +118,7 @@ Sometimes an Approved session has to be cancelled for unforeseen reasons, like i
 At the top of your portal you'll see:
 
 - **Hours completed**
-- **Hours remaining**
+- **Hours unscheduled**: hours you still need to book
 - **A progress bar** showing how far you are toward your goal, plus how many hours are scheduled.
 
 Each rotation card also has its own hours tracker.

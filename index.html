@@ -678,7 +678,7 @@
 <p><strong>Can't get in?</strong> Email <strong><a href="mailto:coordinator@thepreceptorsite.com">coordinator@thepreceptorsite.com</a></strong> with your full name and your university/program.</p>
 <h3>3. Finding your way around</h3>
 <p>Once you're in, you'll see:</p>
-<ul><li><strong>Your hours at the top:</strong> hours completed, hours remaining, and a progress bar (more on this in section 7).</li><li><strong>Your rotation cards:</strong> one card per rotation, each with its own hours tracker.</li><li><strong>Tabs:</strong><ul><li><strong>My Sessions:</strong> every session you've requested and its status. This is where you request and cancel sessions.</li><li><strong>Update Info:</strong> ask for a change to your phone, address, or school supervisor.</li><li><strong>Message Coordinator:</strong> send a message to your coordinator and see their replies.</li><li><strong>My Availability:</strong> let us know about dates you're not available.</li><li><strong>Clinical Rotations:</strong> your rotations and their details.</li><li><strong>Scheduling Policies:</strong> the scheduling rules.</li></ul></li></ul>
+<ul><li><strong>Your hours at the top:</strong> hours completed, hours unscheduled (still to book), and a progress bar (more on this in section 7).</li><li><strong>Your rotation cards:</strong> one card per rotation, each with its own hours tracker.</li><li><strong>Tabs:</strong><ul><li><strong>My Sessions:</strong> every session you've requested and its status. This is where you request and cancel sessions.</li><li><strong>Update Info:</strong> ask for a change to your phone, address, or school supervisor.</li><li><strong>Message Coordinator:</strong> send a message to your coordinator and see their replies.</li><li><strong>My Availability:</strong> let us know about dates you're not available.</li><li><strong>Clinical Rotations:</strong> your rotations and their details.</li><li><strong>Scheduling Policies:</strong> the scheduling rules.</li></ul></li></ul>
 <h3>4. Requesting hours</h3>
 <ol><li>Go to the <strong>My Sessions</strong> tab and click <strong>+ Request a session</strong>.</li><li>Pick <strong>which rotation</strong> the dates are for.</li><li>Enter the <strong>Requested Date</strong>, your <strong>Arrival Time</strong> and <strong>Departure Time</strong>, and the <strong>Estimated Hours</strong>.</li><li>Add your <strong>Clinical Focus / What you hope to work on</strong>, plus any <strong>Notes for Preceptor</strong> (optional).</li><li>Requesting several days? Click <strong>+ Add another date for this student</strong> and add each one, so you can submit them all together.</li><li>Click <strong>Submit</strong>.</li></ol>
 <p>Your info is filled in from your student profile. If something's wrong, use <strong>Update Info</strong> or message your coordinator.</p>
@@ -703,7 +703,7 @@
 <p>Sometimes an Approved session has to be cancelled for unforeseen reasons, like illness, an emergency, a clinic closure, or staffing. Your coordinator and/or preceptor will let you know ASAP and work with you to reschedule. <strong>These cancellations don't count against you.</strong></p>
 <h3>7. Checking your hours</h3>
 <p>At the top of your portal you'll see:</p>
-<ul><li><strong>Hours completed</strong></li><li><strong>Hours remaining</strong></li><li><strong>A progress bar</strong> showing how far you are toward your goal, plus how many hours are scheduled.</li></ul>
+<ul><li><strong>Hours completed</strong></li><li><strong>Hours unscheduled</strong>: hours you still need to book</li><li><strong>A progress bar</strong> showing how far you are toward your goal, plus how many hours are scheduled.</li></ul>
 <p>Each rotation card also has its own hours tracker.</p>
 <p><strong>Only Completed hours count</strong> toward your required rotation hours. Pending and Approved sessions are on the way, but they don't count until they're Completed.</p>
 <h4>Making up missed hours</h4>
@@ -978,7 +978,7 @@
         </div>
         <div style="text-align:right">
           <div class="hours-big" id="s-hours-left">—</div>
-          <div class="hours-detail">hours remaining</div>
+          <div class="hours-detail">hours unscheduled</div>
         </div>
       </div>
     </div>
@@ -3129,7 +3129,7 @@ function renderHoursTracker(h) {
       <div><div class="n">${fmt(h.goal)}</div><div class="lbl">Goal</div></div>
       <div><div class="n">${fmt(h.scheduled)}</div><div class="lbl">Scheduled</div></div>
       <div><div class="n">${fmt(h.completed)}</div><div class="lbl">Completed</div></div>
-      <div><div class="n">${fmt(Math.max(0, h.remaining))}</div><div class="lbl">Remaining</div></div>
+      <div><div class="n">${fmt(Math.max(0, h.remaining))}</div><div class="lbl">Unscheduled</div></div>
     </div>
     <div class="hrs-bar" role="img" aria-label="${fmt(h.completed)} completed and ${fmt(h.scheduled)} scheduled of ${fmt(h.goal)} hours">
       <div class="done" style="width:${donePct}%"></div><div class="sched" style="width:${schedPct}%"></div>
