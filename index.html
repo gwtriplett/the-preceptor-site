@@ -39,6 +39,19 @@
   /* LAYOUT */
   .main { max-width: 1100px; margin: 0 auto; padding: 24px; }
   .page { display: none; }
+  .dash-tiles { display:grid; grid-template-columns:repeat(auto-fill,minmax(170px,1fr)); gap:12px; margin-bottom:16px; }
+  .dash-tile { background:var(--white); border:1px solid var(--gray-100); border-radius:var(--radius); padding:14px 16px; cursor:pointer; text-align:left; font-family:var(--font); transition:border-color .15s; }
+  button.dash-tile:hover { border-color:var(--blue); }
+  .dash-tile .n { font-size:26px; font-weight:800; line-height:1.1; }
+  .dash-tile .l { font-size:12px; font-weight:600; color:var(--text-muted); text-transform:uppercase; letter-spacing:.04em; margin-bottom:4px; }
+  .dash-tile .s { font-size:12px; color:var(--text-muted); margin-top:4px; }
+  .dash-grid { display:grid; grid-template-columns:repeat(auto-fit,minmax(320px,1fr)); gap:16px; margin-bottom:16px; }
+  .dash-row { display:flex; justify-content:space-between; gap:10px; padding:9px 0; border-bottom:1px solid var(--gray-100); font-size:13px; cursor:pointer; }
+  .dash-row:last-child { border-bottom:none; }
+  .dash-row:hover .dash-name { color:var(--blue); }
+  .dash-name { font-weight:600; }
+  .dash-meta { font-size:12px; color:var(--text-muted); }
+  .dash-empty { font-size:13px; color:var(--green); padding:6px 0; }
   .page.active { display: block; }
 
   /* CARDS */
@@ -542,6 +555,7 @@
     </div>
   </div>
   <div class="mode-tabs">
+    <button class="mode-tab" onclick="switchMode('dashboard')">Dashboard</button>
     <button class="mode-tab active" onclick="switchMode('staff')">Staff / Preceptor</button>
     <button class="mode-tab" onclick="switchMode('student')">Student Portal</button>
     <button class="mode-tab" onclick="switchMode('calendar')">Calendar</button>
@@ -850,6 +864,20 @@
 <!-- STAFF PAGE -->
 <!-- ════════════════════════════════════════ -->
 <div class="main">
+<div id="page-dashboard" class="page">
+  <div class="section-head" style="margin-bottom:18px;flex-wrap:wrap;gap:10px">
+    <div>
+      <div class="section-title" style="font-size:18px" id="dash-greeting">Welcome</div>
+      <div class="section-sub" id="dash-date"></div>
+    </div>
+    <div style="display:flex;align-items:center;gap:10px">
+      <span id="dash-updated" style="font-size:12px;color:var(--text-muted)"></span>
+      <button class="btn btn-primary btn-sm" id="dash-refresh" onclick="renderDashboard()">↻ Refresh</button>
+    </div>
+  </div>
+  <div id="dash-body"><div class="card" style="font-size:13px;color:var(--text-muted)">Loading…</div></div>
+</div>
+
 <div id="page-staff" class="page active">
 
   <div class="stats-row" id="staff-stats">
@@ -1676,7 +1704,7 @@ function showApp(role) {
 
   if (role === 'student') {
     // Hide staff-only tabs
-    const staffOnlyTabs = ['Revenue', 'Planning', 'Staff / Preceptor'];
+    const staffOnlyTabs = ['Dashboard', 'Revenue', 'Planning', 'Staff / Preceptor'];
     document.querySelectorAll('.mode-tab').forEach(tab => {
       if (staffOnlyTabs.some(s => tab.textContent.includes(s))) tab.style.display = 'none';
     });
@@ -1706,16 +1734,15 @@ function showApp(role) {
     // Staff — show everything except student-specific mode tab prominence
     document.querySelectorAll('.mode-tab').forEach(tab => {
       tab.style.display = '';
-      if (tab.textContent.includes('Staff')) tab.classList.add('active');
+      if (tab.textContent.includes('Dashboard')) tab.classList.add('active');
     });
-    document.getElementById('page-staff').classList.add('active');
+    document.getElementById('page-dashboard').classList.add('active');
     const settingsBtn = document.getElementById('settings-btn');
     const syncStatus = document.getElementById('sync-status');
     if (settingsBtn) settingsBtn.style.display = '';
     if (syncStatus) syncStatus.style.display = '';
     addSignOutButton();
-    loadSessions();
-    loadStudentDirectory();
+    renderDashboard();
   }
 }
 
@@ -1977,9 +2004,225 @@ async function sendTestEmail() {
 function switchMode(mode) {
   document.querySelectorAll('.mode-tab').forEach(t => t.classList.remove('active'));
   document.querySelectorAll('.page').forEach(p => p.classList.remove('active'));
-  event.target.classList.add('active');
+  const btn = (window.event && window.event.target && window.event.target.closest && window.event.target.closest('.mode-tab'))
+    || document.querySelector(`.mode-tab[onclick="switchMode('${mode}')"]`);
+  if (btn) btn.classList.add('active');
   document.getElementById('page-' + mode).classList.add('active');
   if (mode === 'calendar') { renderCalendar(); }
+}
+
+
+// ── COORDINATOR DASHBOARD ─────────────────────────────
+// Landing page for staff. Read-only: reloads Sessions, Students, Rotations
+// and Messages, then summarises what needs action. Test students ("(TEST)")
+// and Lori Croom are left out of alerts.
+function dashExcluded(name) { return isTestName(name) || /lori\s+croom|croom,\s*lori/i.test(String(name || '')); }
+function dashBusinessDaysSince(iso) {
+  if (!iso) return 0;
+  const d = new Date(iso), now = new Date(); let n = 0;
+  d.setHours(0, 0, 0, 0); now.setHours(0, 0, 0, 0);
+  while (d < now) { d.setDate(d.getDate() + 1); const w = d.getDay(); if (w !== 0 && w !== 6) n++; }
+  return n;
+}
+function dashGo(mode, tab) {
+  switchMode(mode);
+  if (mode === 'staff' && tab) {
+    const el = document.querySelector(`.tab[onclick*="setTab('${tab}'"]`);
+    if (el) setTab(tab, el);
+  }
+  window.scrollTo(0, 0);
+}
+async function renderDashboard() {
+  const body = document.getElementById('dash-body'), btn = document.getElementById('dash-refresh');
+  const now = new Date(), hr = now.getHours();
+  document.getElementById('dash-greeting').textContent = hr < 12 ? 'Good morning' : hr < 17 ? 'Good afternoon' : 'Good evening';
+  document.getElementById('dash-date').textContent = now.toLocaleDateString('en-US', { weekday: 'long', month: 'long', day: 'numeric', year: 'numeric' });
+  if (btn) { btn.disabled = true; btn.textContent = '↻ Refreshing…'; }
+  try {
+    await Promise.all([
+      loadSessions(),
+      loadStudentDirectory(),
+      loadAllMessages().catch(e => console.error('Could not load messages', e)),
+    ]);
+    window._studentMap = {};
+    studentDirectory.forEach(s => { window._studentMap[s.id] = s; });
+    body.innerHTML = buildDashboardHtml();
+    _autoSig = dataSignature(); _autoLast = Date.now();
+    setUpdatedLabel();
+    startAutoRefresh();
+  } catch (e) {
+    console.error(e);
+    body.innerHTML = '<div class="card" style="color:var(--red);font-size:13px">Could not load dashboard data. Try Refresh.</div>';
+  } finally {
+    if (btn) { btn.disabled = false; btn.textContent = '↻ Refresh'; }
+  }
+}
+function buildDashboardHtml() {
+  const today = isoDate(new Date());
+  const money = n => '$' + Math.round(n).toLocaleString();
+  const studentOf = r => (window._studentMap || {})[(r['Student'] || [])[0]] || {};
+  const sessions = allSessions.filter(s => !dashExcluded(s['Student Name']));
+  const rotations = allRotations.filter(r => !dashExcluded(studentOf(r)['Student Name']));
+
+  // Needs action
+  const pending = sessions.filter(s => s['Approval Status'] === 'Pending');
+  const pendingOld = pending.filter(s => dashBusinessDaysSince(s.createdTime) > 2).length;
+  const cancels = cancelRequestSessions().filter(s => !dashExcluded(s['Student Name'])).length;
+  const unread = (allMessages || []).filter(m => (m['Status'] || 'New') === 'New').length;
+  const signoff = sessions.filter(s => s['Approval Status'] === 'Completed' && !s['Signed Off By']).length;
+  const intake = rotations.filter(r => r['Pipeline Status'] === '🟡 Inquiry Received' || r['Admission Status'] === 'Application Received').length;
+  const tile = (label, n, sub, color, onclick) => `<button class="dash-tile" onclick="${onclick}">
+    <div class="l">${label}</div><div class="n" style="color:${n ? color : 'var(--text-muted)'}">${n}</div><div class="s">${sub}</div></button>`;
+  const tiles = `<div class="dash-tiles">
+    ${tile('Pending requests', pending.length, pendingOld ? `<span style="color:var(--amber);font-weight:700">${pendingOld} older than 2 business days</span>` : 'awaiting your review', 'var(--blue)', "dashGo('staff','pending')")}
+    ${tile('Cancellation requests', cancels, 'students asking to cancel', 'var(--amber)', "dashGo('staff')")}
+    ${tile('New messages', unread, 'from students', 'var(--blue)', "dashGo('messages')")}
+    ${tile('Needs sign-off', signoff, 'completed, hours not logged', 'var(--amber)', "dashGo('staff','signoff')")}
+    ${tile('Intake follow-up', intake, 'new submissions', 'var(--teal)', "window.open('staff.html','_blank')")}
+  </div>`;
+
+  // Today & this week
+  const weekEnd = isoDate(new Date(Date.now() + 7 * 86400000));
+  const approved = sessions.filter(s => s['Approval Status'] === 'Approved');
+  const todays = approved.filter(s => s['Session Date'] === today).sort((a, b) => String(a['Start Time'] || '').localeCompare(String(b['Start Time'] || '')));
+  const week = approved.filter(s => s['Session Date'] > today && s['Session Date'] <= weekEnd);
+  const weekHrs = Math.round(week.reduce((a, s) => a + (s['Hours This Session'] || 0), 0) * 10) / 10;
+  const todayCard = `<div class="card">
+    <div class="section-head"><span class="section-title">Today's sessions (${todays.length})</span></div>
+    ${todays.length ? todays.map(s => `<div class="dash-row" onclick="dashGo('calendar')">
+      <div><div class="dash-name">${escapeHtml(s['Student Name'] || '—')}</div><div class="dash-meta">${s['Hours This Session'] || '—'} hrs</div></div>
+      <div class="dash-meta" style="white-space:nowrap">${escapeHtml(s['Start Time'] || '—')} – ${escapeHtml(s['End Time'] || '—')}</div></div>`).join('')
+      : '<div class="dash-meta" style="padding:6px 0">No approved sessions today.</div>'}
+    <div class="dash-meta" style="margin-top:10px;padding-top:10px;border-top:1px solid var(--gray-100)">Next 7 days: <strong>${week.length}</strong> approved session${week.length === 1 ? '' : 's'} · ${weekHrs} hrs</div>
+  </div>`;
+
+  // Revenue snapshot
+  let outstanding = 0, overdueAmt = 0, overdueN = 0, soonAmt = 0, soonN = 0;
+  const soonCut = isoDate(new Date(Date.now() + 14 * 86400000));
+  const owed = [];
+  rotations.forEach(r => {
+    if (rotationStage(r) === 'dropped') return;
+    const bal = (r['Billed Amount'] || 0) - (r['Amount Paid'] || 0);
+    if (bal <= 0) return;
+    outstanding += bal;
+    const due = r['Payment Due Date'];
+    if (due && due < today) { overdueAmt += bal; overdueN++; }
+    else if (due && due <= soonCut) { soonAmt += bal; soonN++; }
+    owed.push({ r, s: studentOf(r), bal, due });
+  });
+  owed.sort((a, b) => (a.due || '9999').localeCompare(b.due || '9999'));
+  const dueText = due => {
+    if (!due) return '<span class="dash-meta">no due date</span>';
+    const d = daysBetween(today, due);
+    if (d < 0) return `<span style="color:var(--red);font-weight:700">${-d} day${d === -1 ? '' : 's'} overdue</span>`;
+    if (d === 0) return '<span style="color:var(--amber);font-weight:700">due today</span>';
+    return `<span class="dash-meta">due in ${d} day${d === 1 ? '' : 's'}</span>`;
+  };
+  const revCard = `<div class="card">
+    <div class="section-head"><span class="section-title">Pending payments (${owed.length})</span>
+      <a href="#" onclick="event.preventDefault();dashGo('revenue')" style="font-size:12px">View full revenue →</a></div>
+    <div class="dash-tiles" style="grid-template-columns:repeat(3,1fr);margin-bottom:10px">
+      <div class="dash-tile" style="cursor:default"><div class="l">Outstanding</div><div class="n" style="font-size:20px;color:var(--amber)">${money(outstanding)}</div></div>
+      <div class="dash-tile" style="cursor:default"><div class="l">Overdue</div><div class="n" style="font-size:20px;color:${overdueN ? 'var(--red)' : 'var(--text-muted)'}">${money(overdueAmt)}</div><div class="s">${overdueN} rotation${overdueN === 1 ? '' : 's'}</div></div>
+      <div class="dash-tile" style="cursor:default"><div class="l">Due ≤ 14 days</div><div class="n" style="font-size:20px;color:var(--blue)">${money(soonAmt)}</div><div class="s">${soonN} rotation${soonN === 1 ? '' : 's'}</div></div>
+    </div>
+    <div style="max-height:320px;overflow-y:auto">
+    ${owed.length ? owed.map(o => `<div class="dash-row" onclick="openStudentModalById('${o.s.id}','${o.r.id}')">
+      <div><div class="dash-name">${escapeHtml(o.s['Student Name'] || '(no student)')}</div><div class="dash-meta">${escapeHtml(o.r['Payment Status'] || '—')}</div></div>
+      <div style="text-align:right;white-space:nowrap"><div style="font-weight:700">${money(o.bal)}</div><div style="font-size:12px">${dueText(o.due)}</div></div></div>`).join('')
+      : '<div class="dash-empty">✓ No balances owed.</div>'}
+    </div>
+  </div>`;
+
+  // Students to watch
+  const ACTIVE = ['Enrollment Completed', '3rd Party Preceptor Enrollment', '🟢 Active Rotation'];
+  const shortList = [], endingList = [];
+  rotations.forEach(r => {
+    if (!ACTIVE.includes(r['Pipeline Status'])) return;
+    const end = r['Requested End Date'];
+    if (!end || end < today) return;
+    const h = rotationHours(r);
+    if (!h.goal) return;
+    const left = Math.round((h.goal - h.planned) * 10) / 10;
+    const days = daysBetween(today, end), s = studentOf(r);
+    const row = { r, s, h, left, days, end };
+    if (left > h.goal * 0.5 && days <= 30) shortList.push(row);
+    if (left > 0 && days <= 14) endingList.push(row);
+  });
+  const watchRows = (list, emptyMsg) => list.length ? list.sort((a, b) => a.end.localeCompare(b.end)).map(o => `<div class="dash-row" onclick="openStudentModalById('${o.s.id}','${o.r.id}')">
+      <div><div class="dash-name">${escapeHtml(o.s['Student Name'] || '(no student)')}</div><div class="dash-meta">${o.h.planned} of ${o.h.goal} hrs scheduled · <strong>${o.left} unscheduled</strong></div></div>
+      <div class="dash-meta" style="text-align:right;white-space:nowrap">ends ${formatDate(o.end)}<br>${o.days} day${o.days === 1 ? '' : 's'} left</div></div>`).join('')
+    : `<div class="dash-empty">✓ ${emptyMsg}</div>`;
+  const watch = `<div class="dash-grid">
+    <div class="card"><div class="section-head"><span class="section-title" style="color:var(--red)">Short on hours (${shortList.length})</span></div>
+      <div class="dash-meta" style="margin-bottom:6px">Over half their hours unscheduled with 30 days or less left</div>${watchRows(shortList, 'No one is short on hours.')}</div>
+    <div class="card"><div class="section-head"><span class="section-title" style="color:var(--amber)">Rotations ending soon (${endingList.length})</span></div>
+      <div class="dash-meta" style="margin-bottom:6px">Ending within 14 days with hours still unscheduled</div>${watchRows(endingList, 'No rotations ending with open hours.')}</div>
+  </div>`;
+
+  return tiles + `<div class="dash-grid">${todayCard}${revCard}</div>` + watch;
+}
+
+
+// ── AUTO-REFRESH (staff) ──────────────────────────────
+// Re-pulls Airtable every 60s while the portal tab is visible, and right
+// away when you come back to the tab. Skips while a modal / student record
+// is open or you're typing, so nothing in progress gets wiped; it catches
+// up as soon as you're done. Only re-renders when the data actually changed.
+const AUTO_REFRESH_MS = 60000;
+let _autoBusy = false, _autoLast = Date.now(), _autoSig = '', _autoTimer = null;
+function portalIsBusy() {
+  if (document.querySelector('.modal-backdrop.open')) return true;
+  const sdm = document.getElementById('student-detail-modal');
+  if (sdm && sdm.style.display && sdm.style.display !== 'none') return true;
+  const a = document.activeElement;
+  if (a && /^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) && a.id !== 'rev-owed-only') return true;
+  return false;
+}
+function dataSignature() {
+  const str = JSON.stringify([allSessions, allRotations, studentDirectory, allMessages]);
+  let h = 0; for (let i = 0; i < str.length; i++) h = (h * 31 + str.charCodeAt(i)) | 0;
+  return str.length + ':' + h;
+}
+function setUpdatedLabel() {
+  const el = document.getElementById('dash-updated');
+  if (el) el.textContent = 'Updated ' + new Date().toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+}
+async function autoRefresh(force) {
+  if (!staffPasswordEntered || sessionStorage.getItem('tps_auth') !== 'staff' || _autoBusy || document.hidden) return;
+  if (!force && portalIsBusy()) return;
+  _autoBusy = true;
+  try {
+    await Promise.all([
+      loadSessions(),
+      loadStudentDirectory(),
+      loadAllMessages().catch(e => console.error('Could not load messages', e)),
+    ]);
+    window._studentMap = {};
+    studentDirectory.forEach(s => { window._studentMap[s.id] = s; });
+    _autoLast = Date.now();
+    setUpdatedLabel();
+    const sig = dataSignature();
+    if (sig === _autoSig) return;
+    _autoSig = sig;
+    const page = (document.querySelector('.page.active') || {}).id;
+    if (page === 'page-dashboard') document.getElementById('dash-body').innerHTML = buildDashboardHtml();
+    else if (page === 'page-calendar') renderCalendar();
+    else if (page === 'page-rotations') { try { await loadUnresolvedMessages(); } catch (_) {} renderRotationsBoard(); }
+    else if (page === 'page-revenue') renderRevenuePage();
+    else if (page === 'page-messages') renderMessagesList();
+  } catch (e) {
+    console.error('Auto-refresh failed', e);
+  } finally {
+    _autoBusy = false;
+  }
+}
+function startAutoRefresh() {
+  if (_autoTimer) return;
+  _autoTimer = setInterval(() => autoRefresh(false), AUTO_REFRESH_MS);
+  document.addEventListener('visibilitychange', () => {
+    if (!document.hidden && Date.now() - _autoLast > 15000) autoRefresh(false);
+  });
 }
 
 // ── TABS ─────────────────────────────────────────────
@@ -4767,6 +5010,7 @@ switchMode = function(mode) {
   if (mode === 'revenue') renderRevenuePage();
   if (mode === 'rotations') renderRotationsPage();
   if (mode === 'messages') renderMessagesPage();
+  if (mode === 'dashboard' && allSessions.length) document.getElementById('dash-body').innerHTML = buildDashboardHtml();
   if (mode === 'planning') { renderBlackoutList(); populateCertStudentSelect(); document.getElementById('capacity-limit').value = getCapacityLimit(); }
 };
 
